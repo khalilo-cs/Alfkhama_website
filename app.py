@@ -90,6 +90,7 @@ if ALLOW_WEAK_PASSWORD and not LOCAL_ONLY:
     raise SystemExit("ALLOW_WEAK_PASSWORD=1 مسموح فقط عند التشغيل المحلي (HOST=127.0.0.1 بدون TRUST_PROXY وبدون PUBLIC_BASE_URL). احذفه قبل النشر.")
 MIN_PASSWORD = 6 if ALLOW_WEAK_PASSWORD else 12
 SESSION_TTL = 12 * 60 * 60
+SESSION_IDLE_TTL = 2 * 60 * 60
 MAX_BODY = 512 * 1024                      # default for JSON bodies (orders, settings, login ...)
 MAX_UPLOAD_BODY = 9 * 1024 * 1024         # one base64-encoded image (<= 5 MB) + its thumbnail
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -708,6 +709,7 @@ def clean_google_settings(data: dict) -> dict:
 
 SESSIONS: dict[str, dict] = {}
 LOGIN_FAILURES: dict[str, list[float]] = {}
+ACCOUNT_FAILURES: dict[str, list[float]] = {}
 ORDER_ATTEMPTS: dict[str, list[float]] = {}
 CONTACT_ATTEMPTS: dict[str, list[float]] = {}
 
@@ -940,6 +942,15 @@ class StoreHandler(BaseHTTPRequestHandler):
         if not session or session["expires"] < time.time():
             SESSIONS.pop(token, None)
             return token, None
+        now = time.time()
+        idle = now - session.get("last_active", now)
+        if idle > SESSION_IDLE_TTL:
+            SESSIONS.pop(token, None)
+            return token, None
+        if session.get("ip") and session["ip"] != self.client_ip():
+            SESSIONS.pop(token, None)
+            return token, None
+        session["last_active"] = now
         return token, session
 
     def require_admin(self, write: bool = False) -> dict | None:
@@ -1355,29 +1366,37 @@ class StoreHandler(BaseHTTPRequestHandler):
         code = str(data.get("code", ""))[:12]
         ip = self.client_ip()
         now = time.time()
-        recent = [t for t in LOGIN_FAILURES.get(ip, []) if now - t < 300]
-        if len(recent) >= 8:
+        recent_ip = [t for t in LOGIN_FAILURES.get(ip, []) if now - t < 300]
+        if len(recent_ip) >= 8:
             raise APIError("محاولات كثيرة. انتظر بضع دقائق ثم حاول مرة أخرى.", 429, {"Retry-After": "300"})
+        ukey = username.lower()
+        recent_acct = [t for t in ACCOUNT_FAILURES.get(ukey, []) if now - t < 900]
+        if len(recent_acct) >= 12:
+            self.log_admin(username or "?", "login_locked", f"account locked after {len(recent_acct)} failures")
+            raise APIError("الحساب مقفل مؤقتًا. انتظر 15 دقيقة ثم حاول مرة أخرى.", 429, {"Retry-After": "900"})
         with connect_db() as conn:
             admin = conn.execute("SELECT username,password_hash,totp_secret FROM admins WHERE username=?", (username,)).fetchone()
         if not admin or not verify_password(password, admin["password_hash"]):
-            recent.append(now); LOGIN_FAILURES[ip] = recent
+            recent_ip.append(now); LOGIN_FAILURES[ip] = recent_ip
+            recent_acct.append(now); ACCOUNT_FAILURES[ukey] = recent_acct
             self.log_admin(username or "?", "login_failed", "wrong username or password")
             raise APIError("اسم المستخدم أو كلمة المرور غير صحيحة.", 401)
         if admin["totp_secret"]:
-            # Second factor: password alone is not enough once the admin enabled an authenticator app.
             if not code:
                 raise APIError("أدخل رمز التحقق من تطبيق المصادقة.", 401, extra={"need_code": True})
             if not totp.verify(admin["totp_secret"], code):
-                recent.append(now); LOGIN_FAILURES[ip] = recent
+                recent_ip.append(now); LOGIN_FAILURES[ip] = recent_ip
+                recent_acct.append(now); ACCOUNT_FAILURES[ukey] = recent_acct
                 self.log_admin(username, "login_failed", "wrong 2FA code")
                 raise APIError("رمز التحقق غير صحيح أو منتهٍ.", 401, extra={"need_code": True})
         LOGIN_FAILURES.pop(ip, None)
+        ACCOUNT_FAILURES.pop(ukey, None)
         purge_expired(SESSIONS, 0, key_expires=True)
         token = secrets.token_urlsafe(36)
         csrf = secrets.token_urlsafe(24)
-        SESSIONS[token] = {"username": admin["username"], "csrf": csrf, "expires": now + SESSION_TTL}
-        self.log_admin(admin["username"], "login", "2FA" if admin["totp_secret"] else "password")
+        SESSIONS[token] = {"username": admin["username"], "csrf": csrf, "expires": now + SESSION_TTL,
+                           "last_active": now, "ip": ip}
+        self.log_admin(admin["username"], "login", f"{'2FA' if admin['totp_secret'] else 'password'} from {ip}")
         self.send_json({"ok": True, "username": admin["username"], "csrf": csrf}, 200,
                        {"Set-Cookie": [self.session_cookie(token, SESSION_TTL), self.flag_cookie(SESSION_TTL)]})
 
