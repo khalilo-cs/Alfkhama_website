@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: alfakhama
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PUBLIC_BASE_URL
+        value: https://alfakhama.onrender.com
+      - key: TRUST_PROXY
+        value: "1"
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "4173"
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: LOG_FORMAT
+        value: json
+      - key: AUTO_BACKUP
+        value: "1"
+    disk:
+      name: store-data
+      mountPath: /data
+      sizeGB: 1
+    healthCheckPath: /api/health
