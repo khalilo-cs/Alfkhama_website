@@ -1102,9 +1102,6 @@ class StoreHandler(BaseHTTPRequestHandler):
         if idle > SESSION_IDLE_TTL:
             SESSIONS.pop(token, None)
             return token, None
-        if session.get("ip") and session["ip"] != self.client_ip():
-            SESSIONS.pop(token, None)
-            return token, None
         session["last_active"] = now
         return token, session
 
@@ -1941,6 +1938,16 @@ class StoreHandler(BaseHTTPRequestHandler):
                         with connect_db() as conn:
                             row = conn.execute("SELECT totp_secret FROM admins WHERE username=?", (session["username"],)).fetchone()
                         self.send_json({"authenticated": True, "username": session["username"], "csrf": session["csrf"], "totp_enabled": bool(row and row["totp_secret"])})
+                    return
+                if path == "/api/admin/session":
+                    # Pure session-status probe for the login screen: 200 either way so an anonymous load logs no 401.
+                    # Anonymous callers learn only "authenticated: false"; every protected endpoint still answers 401.
+                    _, session = self.get_session()
+                    if not session:
+                        self.send_json({"authenticated": False}); return
+                    with connect_db() as conn:
+                        row = conn.execute("SELECT totp_secret FROM admins WHERE username=?", (session["username"],)).fetchone()
+                    self.send_json({"authenticated": True, "username": session["username"], "csrf": session["csrf"], "totp_enabled": bool(row and row["totp_secret"])})
                     return
                 if path == "/api/admin/dashboard":
                     if not self.require_admin(): return

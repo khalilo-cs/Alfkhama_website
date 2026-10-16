@@ -234,6 +234,17 @@ class AdminTests(ServerCase):
             self.assertEqual(self.req("GET", path)[0], 401, path)
         self.assertEqual(self.json("POST", "/api/admin/products", {"name": "x"})[0], 401)
 
+    def test_session_status_probe_is_200_without_private_data(self):
+        status, anon, resp = self.json("GET", "/api/admin/session")
+        self.assertEqual((status, anon), (200, {"authenticated": False}), "anonymous probe leaks nothing")
+        self.assertEqual(resp.getheader("Cache-Control"), "no-store")
+        self.assertEqual(self.req("GET", "/api/admin/me")[0], 401, "protected endpoints stay 401")
+        _, data, resp = self.json("POST", "/api/admin/login", {"username": "admin", "password": self.admin_password})
+        cookie = resp.getheader("Set-Cookie").split(";")[0]
+        status, me, _ = self.json("GET", "/api/admin/session", cookie=cookie)
+        self.assertEqual((status, me["authenticated"], me["username"], me["csrf"]), (200, True, "admin", data["csrf"]))
+        self.assertEqual(self.json("GET", "/api/admin/session", cookie="session=bogus")[1], {"authenticated": False})
+
     def test_login_cookie_flags_and_csrf(self):
         status, data, _ = self.json("POST", "/api/admin/login", {"username": "admin", "password": "wrong-password-123"})
         self.assertEqual(status, 401)
@@ -987,7 +998,7 @@ class TwoFactorTests(ServerCase):
         self.assertEqual(status, 200, data)
         cookies = [v for k, v in resp.getheaders() if k.lower() == "set-cookie"]
         self.assertTrue(any(c.startswith("fakhama_admin=") and "HttpOnly" in c for c in cookies))
-        self.assertTrue(any(c.startswith("fakhama_admin_flag=1") and "HttpOnly" not in c for c in cookies), "readable marker cookie for the storefront admin bar")
+        self.assertTrue(any(c.startswith("fakhama_admin_flag=1") and "HttpOnly" not in c for c in cookies), "readable marker cookie (keeps admin visits out of the statistics)")
         new_cookie = cookies[0].split(";")[0]
         # Disable needs the password and a valid code.
         kw2 = dict(cookie=new_cookie, csrf=data["csrf"])
@@ -1071,7 +1082,7 @@ class StorePagesTests(ServerCase):
             self.assertTrue(main.lstrip().startswith('<section class="page-hero'), path)
             # the shell is intact: header, search, cart, favourites, dialogs and scripts work on every page
             for hook in ('id="searchInput"', 'id="cartOpen"', 'id="cartCount"', 'id="favoritesToggle"', 'id="productModal"',
-                         'id="orderModal"', 'id="orderForm"', 'id="adminBar"', 'id="cartDrawer"', '<style nonce=', 'id="pageStyles"'):
+                         'id="orderModal"', 'id="orderForm"', 'id="cartDrawer"', '<style nonce=', 'id="pageStyles"'):
                 self.assertIn(hook, html, (path, hook))
             ids = re.findall(r'\sid="([^"]+)"', html)
             self.assertEqual(len(ids), len(set(ids)), f"duplicate ids on {path}: {[i for i in ids if ids.count(i) > 1]}")

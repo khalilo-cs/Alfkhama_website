@@ -266,8 +266,6 @@
     :where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:3px solid var(--olive-dark);outline-offset:3px;border-radius:6px}
     main:focus{outline:none}
     .noscript-note{margin:0;padding:12px 18px;background:#fff3cd;color:#664d03;text-align:center}
-    .admin-bar{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;justify-content:center;background:#292d26;color:#f5f1e8;padding:8px 14px;font-size:13px}.admin-bar[hidden]{display:none}
-    .admin-bar a{color:#e9d9b8;font-weight:700;text-decoration:underline;text-underline-offset:3px;padding:6px 2px}
     .gallery-view{display:flex;flex-direction:column;min-width:0;background:#e9e3d9}.gallery-view .modal-image{flex:1}
     .gallery-thumbs{display:flex;gap:8px;padding:10px;overflow-x:auto;background:#f3efe7}
     .gthumb{flex:0 0 auto;width:62px;height:62px;padding:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:#e9e3d9;cursor:pointer}.gthumb img{width:100%;height:100%;object-fit:cover}.gthumb.active{border-color:var(--olive-dark)}
@@ -761,7 +759,6 @@
   <div class="scroll-progress" aria-hidden="true"></div>
   <a class="skip-link" href="#main">تخطي إلى المحتوى الرئيسي</a>
   <noscript><p class="noscript-note">السلة وإرسال الطلبات تحتاج إلى تفعيل JavaScript. يمكنك تصفّح <a href="/products">صفحة المنتجات</a> أو التواصل مع المتجر هاتفيًا.</p></noscript>
-  <div class="admin-bar" id="adminBar" hidden role="region" aria-label="أدوات المدير"><span>أنت مسجّل دخول كمدير</span><a href="/admin/#products/new">+ إضافة منتج</a><a href="/admin/#categories">الأقسام</a><a href="/admin/#orders">الطلبات</a><a href="/admin/#messages">الرسائل</a><a href="/admin/">لوحة الإدارة</a></div>
   <aside class="top-notices" aria-label="معلومات المتجر">
   <div class="demo-ribbon" id="demoRibbon" role="note">
     <span><i class="demo-dot" aria-hidden="true"></i>نسخة تجريبية — المنتجات والأسعار أمثلة؛ راجع معلومات المتجر قبل الإطلاق</span>
@@ -1143,7 +1140,6 @@ function undoRemove(){
   renderCart();toast('أُعيد المنتج إلى السلة');
 }
 function toggleFavorite(id){const has=isFav(id);favorites=has?favorites.filter(x=>String(x)!==String(id)):[...favorites,id];saveState();updateCounts();if(showFavorites)renderProducts();else syncFavorites();toast(has?'أُزيل من المفضلة':'أُضيف إلى المفضلة')}
-const isAdmin=()=>/(?:^|;\s*)fakhama_admin_flag=1/.test(document.cookie);
 const baseTitle=document.title;
 let lastFocus=null,productPushed=false,ignoreNextPop=false,ignorePopTimer=0,closingFromHistory=false,modalProduct=null,modalQty=1,modalMax=1;
 const REC_KEY='fakhama-recent-v1';
@@ -1160,7 +1156,7 @@ function trapTab(e){
 function restoreFocus(){if(lastFocus&&document.contains(lastFocus)){lastFocus.focus();lastFocus=null}}
 const drawerOpen=()=>Boolean($('#cartDrawer')&&$('#cartDrawer').classList.contains('open'));
 // While a dialog (cart drawer, quick view, order form) is open the page behind it is inert: no focus, no screen-reader access, nothing to tab out to.
-function syncInert(){const on=drawerOpen()||Boolean($('.modal-backdrop.open'));$$('#main,.site-footer,.site-header,.top-notices,#adminBar,#toTop').forEach(el=>{if(on)el.setAttribute('inert','');else el.removeAttribute('inert')})}
+function syncInert(){const on=drawerOpen()||Boolean($('.modal-backdrop.open'));$$('#main,.site-footer,.site-header,.top-notices,#toTop').forEach(el=>{if(on)el.setAttribute('inert','');else el.removeAttribute('inert')})}
 function openDrawer(){lastFocus=document.activeElement;renderCart();$('#cartDrawer').inert=false;$('#cartDrawer').classList.add('open');syncInert();$('#drawerOverlay').classList.add('open');document.body.classList.add('locked');$('#cartClose').focus()}
 function closeDrawer(){const was=drawerOpen();if(!was)return;$('#cartDrawer').classList.remove('open');$('#cartDrawer').inert=true;$('#drawerOverlay').classList.remove('open');if(!$('.modal-backdrop.open'))document.body.classList.remove('locked');syncInert();restoreFocus()}
 function openModal(el){if(!$('.modal-backdrop.open'))lastFocus=document.activeElement;el.classList.add('open');document.body.classList.add('locked');syncInert();const focusable=el.querySelector('.modal-close,button,input,textarea');if(focusable)setTimeout(()=>focusable.focus(),60)}
@@ -1178,7 +1174,7 @@ function showProduct(id,opts={}){
   const thumbs=multi?`<div class="gallery-thumbs" role="group" aria-label="صور المنتج">${imgs.map((im,i)=>`<button type="button" class="gthumb${i?'':' active'}" data-gindex="${i}" aria-label="الصورة ${i+1} من ${imgs.length}" aria-pressed="${i?'false':'true'}"><img src="${esc(im.thumb||im.url)}" alt="" loading="lazy" decoding="async"></button>`).join('')}</div>`:'';
   const nav=multi?`<button type="button" class="gnav gnav-prev" data-gnav="-1" aria-label="الصورة السابقة">${icons.chevR}</button><button type="button" class="gnav gnav-next" data-gnav="1" aria-label="الصورة التالية">${icons.chevL}</button><span class="gcount" id="galleryCount" aria-hidden="true">${amount(1)} من ${amount(imgs.length)}</span>`:'';
   const qty=available?`<div class="modal-qty"><span id="modalQtyLabel">الكمية</span><div class="qty-control big" role="group" aria-labelledby="modalQtyLabel"><button type="button" data-mqty="-1" aria-label="تقليل الكمية">−</button><output id="modalQty">1</output><button type="button" data-mqty="1" aria-label="زيادة الكمية">+</button></div></div>`:'';
-  $('#productModalContent').innerHTML=`<div class="product-modal-layout"><div class="gallery-view"><div class="modal-image zoomable" id="galleryStage" style="${esc('--ph:'+cssUrl(imgs[0].thumb||imgs[0].url))}"><img id="galleryMain" src="${esc(imgs[0].url)}" alt="${esc(p.alt||p.name)}" data-count="${imgs.length}" decoding="async">${nav}<button type="button" class="gzoom" data-zoom-toggle aria-pressed="false" aria-label="تكبير الصورة">${icons.zoom}</button><span class="sr-only" id="galleryStatus" role="status" aria-live="polite"></span></div>${thumbs}</div><div class="modal-info"><div class="modal-head"><p class="product-category">${esc(p.categoryName||'ستائر وأقمشة')}</p><button type="button" class="favorite-btn inline${fav?' active':''}" data-favorite="${esc(p.id)}" aria-pressed="${fav}" aria-label="المفضلة: ${esc(p.name)}">${icons.heart}</button></div><h2 id="productModalTitle">${esc(p.name)}</h2><p>${esc(p.description||'')}</p><div class="modal-price">${onRequest(p)?'<span class="on-request">السعر حسب الطلب</span>':`${amount(p.price)} <span style="font-size:13px;font-weight:500;color:var(--muted)">ريال سعودي</span>`}</div>${qty}<button class="btn btn-primary" type="button" data-modal-add="${esc(p.id)}" ${available?'':'disabled'}>${available?`أضف إلى السلة ${icons.arrow}`:'غير متوفر حاليًا'}</button><div class="modal-actions"><a class="btn btn-outline" href="${esc(productUrl(p))}">صفحة المنتج</a><a class="btn btn-outline" href="${esc(wa)}" target="_blank" rel="noopener">مشاركة عبر واتساب<span class="sr-only"> (يفتح في نافذة جديدة)</span></a><button class="btn btn-outline" type="button" data-copy-link="${esc(url)}">نسخ الرابط</button>${isAdmin()?`<a class="btn btn-outline" href="/admin/#products/edit/${esc(p.id)}">تعديل المنتج</a>`:''}</div><span class="modal-note">${available?(onRequest(p)?'يُفصَّل حسب الطلب؛ يؤكد المتجر المقاس والخامة والسعر قبل البدء.':`المتاح حاليًا: ${countAr(p.stock,'piece')}.`):'سيظهر المنتج هنا عند توفر المخزون.'}</span></div></div>`;
+  $('#productModalContent').innerHTML=`<div class="product-modal-layout"><div class="gallery-view"><div class="modal-image zoomable" id="galleryStage" style="${esc('--ph:'+cssUrl(imgs[0].thumb||imgs[0].url))}"><img id="galleryMain" src="${esc(imgs[0].url)}" alt="${esc(p.alt||p.name)}" data-count="${imgs.length}" decoding="async">${nav}<button type="button" class="gzoom" data-zoom-toggle aria-pressed="false" aria-label="تكبير الصورة">${icons.zoom}</button><span class="sr-only" id="galleryStatus" role="status" aria-live="polite"></span></div>${thumbs}</div><div class="modal-info"><div class="modal-head"><p class="product-category">${esc(p.categoryName||'ستائر وأقمشة')}</p><button type="button" class="favorite-btn inline${fav?' active':''}" data-favorite="${esc(p.id)}" aria-pressed="${fav}" aria-label="المفضلة: ${esc(p.name)}">${icons.heart}</button></div><h2 id="productModalTitle">${esc(p.name)}</h2><p>${esc(p.description||'')}</p><div class="modal-price">${onRequest(p)?'<span class="on-request">السعر حسب الطلب</span>':`${amount(p.price)} <span style="font-size:13px;font-weight:500;color:var(--muted)">ريال سعودي</span>`}</div>${qty}<button class="btn btn-primary" type="button" data-modal-add="${esc(p.id)}" ${available?'':'disabled'}>${available?`أضف إلى السلة ${icons.arrow}`:'غير متوفر حاليًا'}</button><div class="modal-actions"><a class="btn btn-outline" href="${esc(productUrl(p))}">صفحة المنتج</a><a class="btn btn-outline" href="${esc(wa)}" target="_blank" rel="noopener">مشاركة عبر واتساب<span class="sr-only"> (يفتح في نافذة جديدة)</span></a><button class="btn btn-outline" type="button" data-copy-link="${esc(url)}">نسخ الرابط</button></div><span class="modal-note">${available?(onRequest(p)?'يُفصَّل حسب الطلب؛ يؤكد المتجر المقاس والخامة والسعر قبل البدء.':`المتاح حاليًا: ${countAr(p.stock,'piece')}.`):'سيظهر المنتج هنا عند توفر المخزون.'}</span></div></div>`;
   prepImages($('#productModalContent'));
   $('#productModal').setAttribute('aria-labelledby','productModalTitle');$('#productModal').removeAttribute('aria-label');
   document.title=`${p.name} | ${STORE.name||baseTitle}`;
@@ -1328,7 +1324,6 @@ function initSearch(){
 function initProductPage(){
   if(PAGE!=='product')return;
   const actions=$('.product-page-actions'),pid=document.body.dataset.productId;if(pid)trackViewed(pid);
-  if(actions&&pid&&isAdmin()&&/^\d+$/.test(pid))actions.insertAdjacentHTML('beforeend',`<a class="btn btn-outline" href="/admin/#products/edit/${pid}">تعديل المنتج</a>`);
   on($('.product-gallery-thumbs'),'keydown',e=>{
     const btn=e.target.closest('[data-page-gindex]');if(!btn)return;const i=Number(btn.dataset.pageGindex),n=$$('[data-page-gindex]').length;
     const next={ArrowLeft:i+1,ArrowRight:i-1,Home:0,End:n-1}[e.key];if(next===undefined)return;e.preventDefault();setPageImage(next,true);
@@ -1504,7 +1499,7 @@ function initConsent(){
   const state=stored();
   if(state==='granted')loadAnalytics(id);else if(!state)show(false);
 }
-setText('#year',new Date().getFullYear());const adminBar=$('#adminBar');if(adminBar&&isAdmin())adminBar.hidden=false;
+setText('#year',new Date().getFullYear());
 try{initConsent()}catch(error){console.info('Consent banner unavailable.',error)} // never blocks the storefront
 {const g=$('#categoryGrid');if(g&&!g.children.length)g.innerHTML=skeletonCategories()}
 markNav();initSearch();initProductPage();initContactForm();renderProducts();renderCart();if(showFavorites)syncSearchUrl();loadLiveCatalog();

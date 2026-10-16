@@ -135,9 +135,20 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const admin = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ar-SA', isMobile: true, hasTouch: true });
     const ap = await admin.newPage();
     ap.on('pageerror', e => errors.push('admin pageerror: ' + e.message));
-    ap.on('response', r => { if (r.status() >= 400 && !r.url().includes('/api/admin/me')) errors.push(`admin http ${r.status()}: ${r.url()}`); });
+    const loginScreen = { statuses: [], consoleErrors: [] }; // what a logged-out visit to /admin/ produced
+    ap.on('response', r => { if (r.status() >= 400) { if (r.url().includes('/api/admin/login')) return; loginScreen.statuses.push(`${r.status()} ${r.url()}`); errors.push(`admin http ${r.status()}: ${r.url()}`); } });
+    ap.on('console', m => { if (m.type() === 'error') loginScreen.consoleErrors.push(m.text()); });
     await ap.goto(base + '/admin/');
     await ap.waitForSelector('#loginForm');
+    await ap.waitForTimeout(800);
+    await check('logged-out /admin/ logs no 401 and no console error (session probe answers 200)', async () => {
+      assert.deepStrictEqual(loginScreen.statuses, [], 'no 4xx responses: ' + loginScreen.statuses.join(', '));
+      assert.deepStrictEqual(loginScreen.consoleErrors, [], 'console errors: ' + loginScreen.consoleErrors.join(' | '));
+      const anon = await ap.evaluate(() => fetch('/api/admin/session', { credentials: 'same-origin' }).then(async r => [r.status, await r.json()]));
+      assert.deepStrictEqual(anon, [200, { authenticated: false }]);
+      const prot = await Promise.all(['/api/admin/me', '/api/admin/dashboard', '/api/admin/products', '/api/admin/orders'].map(u => admin.request.get(base + u).then(r => r.status()))); // API context: not page traffic
+      assert.deepStrictEqual(prot, [401, 401, 401, 401], 'protected endpoints still 401 for anonymous callers');
+    })();
     await ap.screenshot({ path: path.join(SHOTS, '05-admin-login-mobile.png') });
     await check('admin login rejects a wrong password', async () => {
       await ap.fill('#loginUser', 'admin'); await ap.fill('#loginPass', 'wrong-password-123');
@@ -159,6 +170,40 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual(results.filter(ok => !ok).length, 0);
       assert.ok((await ap.textContent('#productsBody')).includes('حسب الطلب'), 'admin shows price on request');
       await ap.screenshot({ path: path.join(SHOTS, '07-admin-products-mobile.png') });
+    })();
+    await check('admin tables become stacked cards at 360px: no page scroll, labels, 44px actions, full names', async () => {
+      const narrow = await browser.newContext({ viewport: { width: 360, height: 740 }, locale: 'ar-SA' });
+      const np = await narrow.newPage();
+      try {
+        await np.goto(base + '/admin/'); await np.waitForSelector('#loginForm');
+        await np.fill('#loginUser', 'admin'); await np.fill('#loginPass', password);
+        await np.click('#loginForm button[type=submit]'); await np.waitForSelector('.stats-grid');
+        for (const [page, body] of [['products', '#productsBody'], ['orders', '#ordersBody']]) {
+          await np.evaluate(p => navigate(p), page); await np.waitForSelector(body + ' tr td');
+          await np.waitForTimeout(400);
+          const m = await np.evaluate(sel => {
+            const W = document.documentElement.clientWidth; const rows = [...document.querySelectorAll(sel + ' tr')];
+            const wrap = document.querySelector(sel).closest('.table-wrap');
+            const cells = [...document.querySelectorAll(sel + ' td[data-label]')];
+            const btns = [...document.querySelectorAll(sel + ' .icon-action')];
+            return { sw: document.documentElement.scrollWidth, W, wrapScroll: wrap.scrollWidth - wrap.clientWidth, rowDisplay: getComputedStyle(rows[0]).display,
+              labelled: cells.length, labelShown: cells.every(c => getComputedStyle(c, '::before').content !== 'none'),
+              roles: document.querySelector(sel).closest('table').getAttribute('role'), rowRole: rows[0].getAttribute('role'),
+              outside: btns.filter(b => { const r = b.getBoundingClientRect(); return r.left < 0 || r.right > W; }).length, small: btns.filter(b => b.getBoundingClientRect().height < 43 || b.getBoundingClientRect().width < 43).length, btns: btns.length,
+              truncated: [...document.querySelectorAll(sel + ' .product-cell b')].filter(b => b.scrollWidth > b.clientWidth + 1).length };
+          }, body);
+          assert.ok(m.sw <= m.W, `${page}: horizontal page scroll ${m.sw} > ${m.W}`);
+          assert.ok(m.wrapScroll <= 0, `${page}: table wrapper still scrolls sideways`);
+          assert.strictEqual(m.rowDisplay, 'block', `${page}: rows are cards`);
+          assert.ok(m.labelled > 0 && m.labelShown, `${page}: data-label captions visible`);
+          assert.strictEqual(m.roles, 'table'); assert.strictEqual(m.rowRole, 'row');
+          assert.ok(m.btns > 0 && m.outside === 0 && m.small === 0, `${page}: actions reachable and >=44px (${JSON.stringify(m)})`);
+          assert.strictEqual(m.truncated, 0, `${page}: names not truncated`);
+          await np.screenshot({ path: path.join(SHOTS, `07b-admin-${page}-360.png`) });
+        }
+        await np.evaluate(() => navigate('overview')); await np.waitForSelector('.stats-grid'); await np.waitForTimeout(600);
+        assert.ok(await np.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'overview: no horizontal page scroll at 360');
+      } finally { await narrow.close(); }
     })();
     const png = path.join(dataDir, 'upload-test.png');
     fs.writeFileSync(png, PNG);
@@ -188,12 +233,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       const html = await (await fetch(base + '/product/' + encodeURIComponent(made.slug))).text();
       assert.ok(html.includes('og:title') && html.includes('ستارة اختبار الرفع') && html.includes('"Product"'));
     })();
-    await check('admin bar appears on the storefront for a logged-in admin; product modal has gallery, share and edit', async () => {
+    await check('storefront shows no admin tools even to a logged-in admin; product modal has gallery and share', async () => {
       const sp = await admin.newPage();
       await sp.goto(base + '/');
       await sp.waitForSelector('.product-card');
-      await sp.waitForSelector('#adminBar:not([hidden])');
-      assert.ok((await sp.getAttribute('#adminBar a', 'href')).startsWith('/admin/#products/new'));
+      assert.strictEqual(await sp.locator('#adminBar').count(), 0, 'no admin bar on the storefront');
       await sp.fill('#searchInput', 'ستارة اختبار الرفع').catch(async () => { await sp.click('#searchToggle'); await sp.fill('#searchInput', 'ستارة اختبار الرفع'); });
       await sp.locator('#searchInput').blur(); // the suggestion list would cover the card
       await sp.locator('.quick-add').first().click({ force: true });
@@ -203,7 +247,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.ok((await sp.title()).includes('ستارة اختبار الرفع'));
       await sp.click('.gthumb:nth-child(2)');
       assert.ok((await sp.getAttribute('.gthumb:nth-child(2)', 'aria-pressed')) === 'true');
-      assert.ok(await sp.locator('text=تعديل المنتج').count() === 1, 'admin edit link');
+      assert.ok(await sp.locator('text=تعديل المنتج').count() === 0, 'no admin edit link for customers');
       assert.ok((await sp.getAttribute('a:has-text("مشاركة عبر واتساب")', 'href')).startsWith('https://wa.me/?text='));
       await sp.keyboard.press('Escape');
       await sp.waitForFunction(() => !document.querySelector('#productModal.open'));
