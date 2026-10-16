@@ -34,7 +34,7 @@
 
 | الطبقة | التقنية |
 |---|---|
-| الخادم | Python 3.10+ (المكتبة القياسية فقط: `http.server`، `sqlite3`، `hashlib`، `hmac`، `gzip`، `zipfile`…)، بلا أي حزمة خارجية |
+| الخادم | Python 3.10+ (المكتبة القياسية فقط: `http.server`، `sqlite3`، `hashlib`، `hmac`، `gzip`، `zipfile`…)، بلا أي حزمة بايثون خارجية؛ ومكتبة Chart.js 4.5.1 مضمّنة محليًا في `assets/vendor/` للوحة الإحصاءات (انظر THIRD-PARTY-LICENSES.md) |
 | قاعدة البيانات | SQLite بوضع WAL، مفاتيح أجنبية مفعّلة (`PRAGMA foreign_keys=ON`)، معاملات للطلبات والمخزون |
 | الواجهة | HTML وCSS وJavaScript مباشرة دون أطر عمل أو مكتبات أو شبكات توزيع محتوى (CDN) |
 | الخطوط | El Messiri للعناوين (رخصة SIL OFL 1.1) مستضاف داخل الموقع في `assets/fonts`؛ النص بخط الجهاز |

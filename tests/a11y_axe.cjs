@@ -76,6 +76,45 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
       await page.locator('.quick-add').first().click({ force: true }); await page.waitForSelector('#productModal.open'); await page.waitForTimeout(300);
       await audit(page, `product modal (${label})`);
       await page.keyboard.press('Escape');
+      {
+        // States added with the storefront v2 UI: suggestions, a two-photo quick view (arrows, zoom), the cart (with the undo bar), the order form
+        // (empty, with errors, confirmation), the install card, the recently-viewed strip and a filtered list.
+        const products = (await (await fetch(base + '/api/products')).json()).products, two = products.find(p => p.slug === gallerySlug);
+        await page.goto(base + '/'); await catalogReady(page);
+        if (label === 'phone') await page.click('#searchToggle');
+        await page.fill('#searchInput', 'ستارة'); await page.waitForSelector('#searchSuggest:not([hidden]) .suggest-item');
+        await audit(page, `search suggestions (${label})`);
+        await page.locator('#searchInput').blur(); await page.evaluate(() => { document.querySelector('#searchInput').value = ''; });
+        await page.evaluate(id => showProduct(id), two.id); await page.waitForSelector('#productModal.open'); await page.waitForTimeout(400);
+        await audit(page, `quick view with two photos, arrows and zoom button (${label})`);
+        await page.click('#productModal .gnav-next'); await page.click('#productModal [data-zoom-toggle]'); await page.waitForTimeout(400);
+        await audit(page, `quick view zoomed (${label})`);
+        await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.waitForFunction(() => !document.querySelector('#productModal.open'));
+        await page.evaluate(id => addToCart(id, 2), two.id); await page.click('#cartOpen'); await page.waitForSelector('#cartDrawer.open'); await page.waitForTimeout(500);
+        await audit(page, `cart drawer with items (${label})`);
+        await page.click('#cartItems [data-remove]'); await page.waitForSelector('#cartItems .undo-bar');
+        await audit(page, `cart drawer with the undo bar (${label})`);
+        await page.click('#cartItems [data-undo]'); await page.waitForSelector('#cartItems .cart-line');
+        await page.click('#checkoutBtn'); await page.waitForSelector('#orderModal.open'); await page.waitForTimeout(500);
+        await audit(page, `order form (${label})`);
+        await page.click('#orderForm button[type=submit]'); await page.waitForSelector('#orderAlert:not([hidden])');
+        await audit(page, `order form with validation errors (${label})`);
+        await page.fill('#customerName', 'عميل فحص الوصول'); await page.fill('#customerPhone', '0551234567'); await page.fill('#customerCity', 'جدة'); await page.check('#orderConsent');
+        await page.click('#orderForm button[type=submit]'); await page.waitForSelector('#orderDone:not([hidden])'); await page.waitForTimeout(300);
+        await audit(page, `order confirmation (${label})`);
+        await page.click('[data-order-close]'); await page.waitForFunction(() => !document.querySelector('#orderModal.open'));
+        await page.evaluate(() => { window.__installDelayMs = 50; const e = new Event('beforeinstallprompt', { cancelable: true }); e.prompt = async () => {}; e.userChoice = Promise.resolve({ outcome: 'dismissed' }); window.dispatchEvent(e); });
+        await page.waitForSelector('.install-card'); await page.waitForTimeout(700);
+        await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' })); // measure from the top, not under the sticky header
+        await audit(page, `install card (${label})`);
+        await page.click('[data-install-later]');
+        await page.goto(base + '/'); await catalogReady(page); await page.waitForSelector('#recentSection .recent-item'); await page.waitForTimeout(500);
+        await revealAll(page, `storefront with the recently viewed strip (${label})`);
+        await audit(page, `storefront with the recently viewed strip (${label})`);
+        await page.goto(base + '/products?stock=1&sort=low'); await catalogReady(page); await revealAll(page, `filtered list (${label})`);
+        await audit(page, `products page with sort and availability filters on (${label})`);
+        await page.goto(base + '/'); await catalogReady(page);
+      }
       for (const [name, url, status] of PAGES) {
         const resp = await page.goto(base + url);
         if (!resp || resp.status() !== status) fail(`${name} (${label}) — HTTP ${resp && resp.status()}, expected ${status}`);
@@ -87,6 +126,8 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
           await page.fill('#contactName', 'زائر فحص الوصول'); await page.fill('#contactPhone', '0551234567'); await page.fill('#contactMessage', 'رسالة تجريبية لفحص حالة الإرسال.');
           await page.check('#contactForm input[name=consent]'); await page.click('#contactForm button[type=submit]');
           await page.waitForSelector('#contactStatus[data-state="success"]');
+          // focusing the status scrolls the form's first field under the sticky header; audit it where a visitor can see all of it
+          await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' }));
           await audit(page, `contact page after sending (${label})`);
         }
       }
@@ -94,6 +135,16 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
       await page.goto(base + '/admin/'); await page.waitForSelector('#loginForm'); await audit(page, `admin login (${label})`);
       await adminLogin(page);
       await audit(page, `admin dashboard (${label})`);
+      // Dashboard with real data: an order (so charts, status donut and lists render) and each range.
+      await page.evaluate(async () => {
+        const list = (await (await fetch('/api/products')).json()).products;
+        await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'عميل فحص', phone: '0551234567', city: 'جدة', consent: true, items: [{ product_id: list[0].id, quantity: 1 }] }) });
+      });
+      for (const r of [7, 30, 90]) {
+        await page.evaluate(x => { location.hash = '#overview/' + x; }, r);
+        await page.reload(); await page.waitForSelector('#chOrders'); await page.waitForTimeout(800);
+        await audit(page, `admin dashboard range ${r} with data (${label})`);
+      }
       for (const p of ['products', 'orders', 'messages', 'categories', 'settings']) {
         await page.evaluate(x => navigate(x), p); await page.waitForTimeout(700);
         if (p === 'messages') {

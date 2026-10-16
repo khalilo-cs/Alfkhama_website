@@ -78,8 +78,10 @@ SERVICES = [
      _icon('<path d="M4 6c2.7-2 5.3 2 8 0s5.3-2 8 0M4 12c2.7-2 5.3 2 8 0s5.3-2 8 0M4 18c2.7-2 5.3 2 8 0s5.3-2 8 0"/>', "1.6")),
 ]
 
-SORT_OPTIONS = ('<option value="featured">ترتيب مقترح</option><option value="low">السعر: الأقل أولًا</option>'
+SORT_OPTIONS = ('<option value="featured">ترتيب مقترح</option><option value="newest">الأحدث أولًا</option><option value="low">السعر: الأقل أولًا</option>'
                 '<option value="high">السعر: الأعلى أولًا</option><option value="name">الاسم: أ إلى ي</option>')
+TOOLBAR_EXTRAS = ('<div class="filter-extras"><label class="toggle-chip"><input type="checkbox" id="stockOnly"><span>المتوفر فقط</span></label>'
+                  '<button type="button" class="clear-filters" id="clearFilters" data-clear-filters hidden>مسح التصفية</button></div>')
 NEW_TAB = '<span class="sr-only"> (يفتح في نافذة جديدة)</span>'
 _DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 
@@ -166,10 +168,20 @@ def paragraphs(text: str, cls: str = "") -> str:
     return "".join(f"<p{attr}>{text_lines(b)}</p>" for b in blocks)
 
 
+_AR_MARKS = re.compile("[\u064B-\u065F\u0670\u0640]")
+_AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ة": "ه", "ؤ": "و", "ئ": "ي",
+                          **{c: str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}, **{c: str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")}})
+
+
+def normalize_ar(text: str) -> str:
+    """Same folding as the storefront script's normAr(): case, diacritics/tatweel, alef/yaa/taa-marbuta variants, Arabic digits."""
+    return re.sub(r"\s+", " ", _AR_MARKS.sub("", str(text or "").lower()).translate(_AR_FOLD)).strip()
+
+
 def search_matches(product: dict, term: str) -> bool:
-    """Same haystack as the storefront script's search (name, category, description, SKU)."""
+    """Same haystack and folding as the storefront script's search (name, category, description, SKU)."""
     hay = f'{product.get("name", "")} {product.get("category_name", "")} {product.get("description", "")} {product.get("sku", "")}'
-    return term.lower() in hay.lower()
+    return normalize_ar(term) in normalize_ar(hay)
 
 
 # -- building blocks --------------------------------------------------------------------------------------------------
@@ -206,9 +218,9 @@ def product_card(p: dict) -> str:
     badge = "نفد المخزون" if out else esc(p.get("badge") or "متوفر")
     quick = "عرض التفاصيل" if out else "عرض التفاصيل وإضافة للسلة"
     return (f'<article class="product-card"><div class="product-image-wrap">'
-            f'<img class="product-image" src="{esc(p.get("thumb") or p.get("image") or "")}" alt="{esc(p.get("alt") or p.get("name", ""))}" loading="lazy" decoding="async">'
+            f'<img class="product-image" src="{esc(p.get("thumb") or p.get("image") or "")}" alt="{esc(p.get("alt") or p.get("name", ""))}" width="600" height="648" loading="lazy" decoding="async">'
             f'<span class="product-badge">{badge}</span>'
-            f'<button class="favorite-btn" data-favorite="{pid}" aria-label="إضافة إلى المفضلة: {name}" aria-pressed="false">{HEART}</button>'
+            f'<button class="favorite-btn" data-favorite="{pid}" aria-label="المفضلة: {name}" aria-pressed="false">{HEART}</button>'
             f'<button class="quick-add" data-quick="{pid}">{quick}</button></div>'
             f'<div class="product-info"><p class="product-category">{esc(p.get("category_name") or "ستائر وأقمشة")}</p>'
             f'<h3 class="product-name"><a class="product-link" href="{esc(product_path(p.get("slug", "")))}">{name}</a></h3>'
@@ -219,7 +231,7 @@ def product_card(p: dict) -> str:
 def category_card(c: dict) -> str:
     """Same look as the home page's category cards; the photo is decorative (the heading names the link)."""
     return (f'<a class="category-card" href="{esc(category_path(c["slug"]))}">'
-            f'<img src="{esc(c.get("cover") or "")}" alt="" loading="lazy" decoding="async">'
+            f'<img src="{esc(c.get("cover") or "")}" alt="" width="600" height="400" loading="lazy" decoding="async">'
             f'<div class="category-card-content"><div><h3>{esc(c["name"])}</h3><p>{count_ar(c.get("count") or 0)}</p></div>'
             f'<span class="round-arrow">{ARROW}</span></div></a>')
 
@@ -241,7 +253,7 @@ def shop_section(products: list[dict], *, heading: str, filters: list[dict] | No
     return (f'<section class="section shop-section" id="shop" aria-labelledby="shopTitle"><div class="container">'
             f'<h2 class="sr-only" id="shopTitle">{esc(heading)}</h2>'
             f'<div class="toolbar">{chips}<span class="result-count" id="resultCount" aria-live="polite">{count_ar(len(products))}</span>'
-            f'<label><span class="sr-only">ترتيب المنتجات</span><select class="sort-select" id="sortSelect">{SORT_OPTIONS}</select></label></div>'
+            f'{TOOLBAR_EXTRAS}<label><span class="sr-only">ترتيب المنتجات</span><select class="sort-select" id="sortSelect">{SORT_OPTIONS}</select></label></div>'
             f'<div class="product-grid" id="productGrid" aria-live="polite">{cards}</div>'
             '<p class="product-footnote" id="productFootnote">«السعر حسب الطلب» يعني أن السعر يُحدَّد بعد تأكيد المقاس والخامة. '
             'لا يوجد دفع إلكتروني؛ يُسجَّل الطلب للمراجعة ويتواصل المتجر لتأكيده.</p>'

@@ -69,6 +69,8 @@ public class MainActivity extends ComponentActivity {
     private static final String PREF_ORIGIN = "origin";
     private static final String EXTRA_START_PATH = "start_path";
     private static final String ADMIN_START_PATH = "/admin/";
+    /** Suggested (pre-filled, editable) server for the first run of a test build. Release builds use BuildConfig only. */
+    static final String SUGGESTED_ORIGIN = "https://alfakhama.onrender.com";
 
     private WebView webView;
     private ProgressBar progress;
@@ -212,7 +214,8 @@ public class MainActivity extends ComponentActivity {
         input.setTextDirection(View.TEXT_DIRECTION_LTR);
         input.setHint(R.string.server_prompt_hint);
         input.setSingleLine(true);
-        if (origin != null) input.setText(origin);
+        input.setText(origin != null ? origin : SUGGESTED_ORIGIN);
+        input.selectAll();
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.server_prompt_title)
                 .setMessage(errorText == null ? getString(R.string.server_prompt_message) : errorText)
@@ -254,6 +257,9 @@ public class MainActivity extends ComponentActivity {
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setGeolocationEnabled(false);
+        s.setSupportZoom(true); // pinch-zoom stays available for accessibility (charts, tables, product photos)
+        s.setBuiltInZoomControls(true);
+        s.setDisplayZoomControls(false); // no on-screen +/- overlay
         s.setSupportMultipleWindows(true); // window.open() is routed through NavigationPolicy (wa.me, maps, ...)
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setMediaPlaybackRequiresUserGesture(true);

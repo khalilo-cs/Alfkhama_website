@@ -80,4 +80,9 @@ public class ServerOriginTest {
         assertFalse(ServerOrigin.isLocalHost("example.com"));
         assertFalse(ServerOrigin.isLocalHost("localhost.example.com"));
     }
+
+    @org.junit.Test
+    public void suggestedFirstRunOriginIsAValidHttpsOrigin() throws Exception {
+        assertEquals("https://alfakhama.onrender.com", ServerOrigin.normalize(MainActivity.SUGGESTED_ORIGIN, false));
+    }
 }

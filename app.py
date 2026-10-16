@@ -432,8 +432,65 @@ def init_db() -> str | None:
                 raise RuntimeError(f"ADMIN_PASSWORD must be at least {MIN_PASSWORD} characters")
             conn.execute("INSERT INTO admins(username,password_hash,updated_at) VALUES(?,?,?)",
                          (username, hash_password(password), now_iso()))
+            if ADMIN_PASSWORD:
+                remember_admin_fingerprint(conn, username, password)
+        else:
+            global ADMIN_SYNC_RESULT
+            ADMIN_SYNC_RESULT = sync_admin_credentials(conn, ADMIN_USERNAME, ADMIN_PASSWORD)
         prune_analytics(conn)
     return generated_password
+
+
+# -- admin credentials from the environment ----------------------------------------------------------------------------
+ADMIN_FP_KEY = "admin_cred_fp"
+ADMIN_SYNC_RESULT: dict = {"status": "not_run"}
+
+
+def credential_fingerprint(username: str, password: str, salt: bytes | None = None) -> str:
+    """Slow salted PBKDF2 digest of username+password, stored as "salt$digest". It only answers "did the environment
+    values change?" and is never a usable login hash (it is not the admins.password_hash value)."""
+    return hash_password(f"fp\x00{username}\x00{password}", salt)
+
+
+def remember_admin_fingerprint(conn: sqlite3.Connection, username: str, password: str) -> None:
+    conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                 (ADMIN_FP_KEY, credential_fingerprint(username, password)))
+
+
+def sync_admin_credentials(conn: sqlite3.Connection, username: str, password: str, force: bool = False) -> dict:
+    """Apply ADMIN_USERNAME / ADMIN_PASSWORD to the existing admin row when they differ from the values applied last time
+    (compared through a keyed fingerprint, so a password the admin later changed in the panel is NOT overwritten while the
+    environment stays the same). `force` (CLI set-admin) applies them unconditionally. Never returns or logs the password."""
+    username = (username or "").strip()
+    if not username:
+        current = conn.execute("SELECT username FROM admins ORDER BY rowid LIMIT 1").fetchone()
+        username = current["username"] if current else "admin"
+    if not password:
+        return {"status": "skipped", "reason": "no_password"}
+    if len(password) < MIN_PASSWORD:
+        return {"status": "skipped", "reason": "weak_password", "min_length": MIN_PASSWORD}
+    if len(username) > 100:
+        return {"status": "skipped", "reason": "bad_username"}
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (ADMIN_FP_KEY,)).fetchone()
+    if row and not force:
+        try:
+            salt_hex, expected = row["value"].split("$", 1)
+            actual = credential_fingerprint(username, password, bytes.fromhex(salt_hex)).split("$", 1)[1]
+            if hmac.compare_digest(actual, expected):
+                return {"status": "unchanged"}
+        except (ValueError, TypeError):
+            pass
+    admin = conn.execute("SELECT rowid AS rid, username FROM admins ORDER BY rowid LIMIT 1").fetchone()
+    if not admin:
+        return {"status": "skipped", "reason": "no_admin"}
+    if username != admin["username"] and conn.execute("SELECT 1 FROM admins WHERE username=?", (username,)).fetchone():
+        return {"status": "skipped", "reason": "username_taken"}
+    conn.execute("UPDATE admins SET username=?, password_hash=?, updated_at=? WHERE rowid=?",
+                 (username, hash_password(password), now_iso(), admin["rid"]))
+    remember_admin_fingerprint(conn, username, password)
+    SESSIONS.clear()
+    audit(conn, "system", "admin_credentials_synced", "username=" + username + (" (cli)" if force else " (env)"))
+    return {"status": "updated", "username": username, "totp_kept": True}
 
 
 # -- first-party statistics -------------------------------------------------------------------------------------------
@@ -500,9 +557,107 @@ def analytics_report(days: int, now: datetime | None = None) -> dict:
             "orders_last30": orders_last30, "contact_last30": contact_last30}
 
 
+DASHBOARD_RANGES = (7, 30, 90)
+
+
+def dashboard_report(days: int, now: datetime | None = None) -> dict:
+    """GET /api/admin/dashboard?range=7|30|90. Days follow the shop's calendar (Asia/Riyadh). Counts include every order
+    placed in the window; revenue only sums orders whose total is known (no "price on request" line, total > 0, not cancelled)."""
+    now = now or datetime.now(timezone.utc)
+    today = shop_today(now)
+    first = today - timedelta(days=days - 1)
+    prev_first = first - timedelta(days=days)
+
+    def utc_start(day) -> str:
+        return datetime(day.year, day.month, day.day, tzinfo=SHOP_TZ).astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    def local_day(created_at: str) -> str:
+        try:
+            return datetime.fromisoformat(created_at).astimezone(SHOP_TZ).date().isoformat()
+        except ValueError:
+            return created_at[:10]
+
+    start_utc, prev_utc = utc_start(first), utc_start(prev_first)
+    day_list = [(first + timedelta(days=i)).isoformat() for i in range(days)]
+    by_day = {d: {"day": d, "count": 0, "revenue_known": 0} for d in day_list}
+    by_status = {key: 0 for key in ORDER_STATUSES}
+    orders_period = orders_prev = 0
+    revenue = 0
+    known_orders = 0
+    with connect_db() as conn:
+        rows = conn.execute(
+            "SELECT o.id, o.status, o.total, o.created_at, EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.unit_price=0) AS on_request "
+            "FROM orders o WHERE o.created_at >= ?", (prev_utc,)).fetchall()
+        for r in rows:
+            if r["created_at"] < start_utc:
+                orders_prev += 1
+                continue
+            orders_period += 1
+            by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+            entry = by_day.get(local_day(r["created_at"]))
+            if entry is None:
+                continue
+            entry["count"] += 1
+            if r["status"] != "cancelled" and not r["on_request"] and r["total"] > 0:
+                entry["revenue_known"] += r["total"]
+                revenue += r["total"]
+                known_orders += 1
+        orders_total = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        pending = conn.execute("SELECT COUNT(*) FROM orders WHERE status='new'").fetchone()[0]
+        unread = conn.execute("SELECT COUNT(*) FROM messages WHERE status='new'").fetchone()[0]
+        products_total = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+        products_active = conn.execute("SELECT COUNT(*) FROM products WHERE active=1").fetchone()[0]
+        low_count = conn.execute("SELECT COUNT(*) FROM products WHERE active=1 AND stock<=3").fetchone()[0]
+        low_stock = [{"id": r["id"], "name": r["name"], "stock": r["stock"]} for r in conn.execute(
+            "SELECT id,name,stock FROM products WHERE active=1 AND stock<=3 ORDER BY stock,id LIMIT 8")]
+        visits_prev = conn.execute("SELECT COALESCE(SUM(views),0) FROM page_views WHERE day>=? AND day<?",
+                                   (prev_first.isoformat(), first.isoformat())).fetchone()[0]
+        views_by_slug: dict[str, int] = {}
+        for r in conn.execute("SELECT path, SUM(views) AS v FROM page_views WHERE day>=? AND day<=? AND path LIKE '/product/%' GROUP BY path",
+                              (first.isoformat(), today.isoformat())):
+            slug = unquote(r["path"][len("/product/"):])
+            views_by_slug[slug] = views_by_slug.get(slug, 0) + r["v"]
+        sold = {r["id"]: r["n"] for r in conn.execute(
+            "SELECT i.product_id AS id, COUNT(DISTINCT i.order_id) AS n FROM order_items i JOIN orders o ON o.id=i.order_id "
+            "WHERE o.created_at >= ? AND o.status<>'cancelled' AND i.product_id IS NOT NULL GROUP BY i.product_id", (start_utc,))}
+        candidates = []
+        for p in conn.execute("SELECT id,name,slug FROM products"):
+            orders_n, views_n = sold.get(p["id"], 0), views_by_slug.get(p["slug"], 0)
+            if orders_n or views_n:
+                candidates.append({"id": p["id"], "name": p["name"], "orders": orders_n, "views": views_n})
+        candidates.sort(key=lambda c: (-c["orders"], -c["views"], c["id"]))
+        top_categories = [{"slug": r["slug"], "name": r["name"], "orders": r["n"]} for r in conn.execute(
+            "SELECT c.slug AS slug, c.name AS name, COUNT(DISTINCT i.order_id) AS n FROM order_items i "
+            "JOIN orders o ON o.id=i.order_id JOIN products p ON p.id=i.product_id JOIN categories c ON c.slug=p.category "
+            "WHERE o.created_at >= ? AND o.status<>'cancelled' GROUP BY c.slug ORDER BY n DESC, c.sort_order, c.slug LIMIT 5", (start_utc,))]
+        recent_orders = [{"id": r["id"], "order_number": r["order_number"], "customer_name": r["customer_name"], "status": r["status"],
+                          "status_label": ORDER_STATUSES.get(r["status"], r["status"]), "total": r["total"],
+                          "on_request": bool(r["on_request"]), "created_at": r["created_at"]} for r in conn.execute(
+            "SELECT o.id,o.order_number,o.customer_name,o.status,o.total,o.created_at, "
+            "EXISTS(SELECT 1 FROM order_items i WHERE i.order_id=o.id AND i.unit_price=0) AS on_request "
+            "FROM orders o ORDER BY o.id DESC LIMIT 8")]
+        recent_messages = [{"id": r["id"], "name": r["name"], "status": r["status"], "created_at": r["created_at"],
+                            "preview": (r["message"] or "")[:80]} for r in conn.execute(
+            "SELECT id,name,status,created_at,message FROM messages ORDER BY id DESC LIMIT 5")]
+    traffic = analytics_report(days, now)
+    visits_by_day = [{"day": d["date"], "views": d["views"]} for d in traffic["daily"]]
+    return {
+        "range": days, "generated_at": now_iso(), "timezone": "Asia/Riyadh",
+        "kpis": {"orders_total": orders_total, "orders_period": orders_period, "orders_prev_period": orders_prev,
+                 "orders_new_pending": pending, "revenue_period_known": revenue if known_orders else None,
+                 "avg_order_value_known": round(revenue / known_orders) if known_orders else None,
+                 "messages_unread": unread, "products_active": products_active, "products_total": products_total,
+                 "low_stock_count": low_count, "visits_period": traffic["period_views"], "visits_prev_period": visits_prev},
+        "orders_by_day": [by_day[d] for d in day_list], "orders_by_status": by_status,
+        "top_products": candidates[:5], "top_categories": top_categories, "visits_by_day": visits_by_day,
+        "top_pages": traffic["top_pages"], "referrers": traffic["referrers"], "low_stock": low_stock,
+        "recent_orders": recent_orders, "recent_messages": recent_messages,
+    }
+
+
 def get_settings(conn: sqlite3.Connection) -> dict:
     data = DEFAULT_SETTINGS.copy()
-    data.update({row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings")})
+    data.update({row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings WHERE key<>?", (ADMIN_FP_KEY,))})
     return data
 
 
@@ -1340,6 +1495,10 @@ class StoreHandler(BaseHTTPRequestHandler):
             self._send(404, b"Not found", "text/plain; charset=utf-8"); return
         target, forced_type = found
         content_type = forced_type or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if target.suffix.lower() in (".js", ".mjs"):
+            content_type = "application/javascript"
+        elif target.suffix.lower() == ".css":
+            content_type = "text/css"
         if content_type.startswith("text/") or content_type in ("application/javascript", "application/json", "application/manifest+json"):
             content_type += "; charset=utf-8"
         try:
@@ -1350,7 +1509,7 @@ class StoreHandler(BaseHTTPRequestHandler):
         headers = {"Last-Modified": formatdate(stat.st_mtime, usegmt=True), "ETag": f'W/"{stat.st_size}-{stat.st_mtime_ns}"'}
         if path.startswith("/uploads/"):
             headers["Cache-Control"] = "public, max-age=31536000, immutable"   # uploads get a random name: never reused
-        elif path.startswith("/assets/fonts/"):
+        elif path.startswith(("/assets/fonts/", "/assets/vendor/")):
             headers["Cache-Control"] = "public, max-age=31536000, immutable"   # font files are never edited in place
         elif path.startswith(("/assets/", "/icons/")):
             headers["Cache-Control"] = "public, max-age=86400"
@@ -1785,6 +1944,11 @@ class StoreHandler(BaseHTTPRequestHandler):
                     return
                 if path == "/api/admin/dashboard":
                     if not self.require_admin(): return
+                    range_arg = parse_qs(parsed.query, keep_blank_values=True).get("range")
+                    if range_arg is not None:
+                        if len(range_arg) != 1 or not re.fullmatch(r"\d{1,3}", range_arg[0]) or int(range_arg[0]) not in DASHBOARD_RANGES:
+                            raise APIError("قيمة range يجب أن تكون 7 أو 30 أو 90.")
+                        self.send_json(dashboard_report(int(range_arg[0]))); return
                     with connect_db() as conn:
                         total_products = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
                         active_count = conn.execute("SELECT COUNT(*) FROM products WHERE active=1").fetchone()[0]
@@ -2225,6 +2389,36 @@ def start_auto_backup(keep: int) -> None:
     threading.Thread(target=loop, daemon=True, name="auto-backup").start()
 
 
+def run_set_admin() -> int:
+    """python3 app.py set-admin: set the admin username/password from ADMIN_USERNAME / ADMIN_PASSWORD, or prompt for them."""
+    global ADMIN_USERNAME, ADMIN_PASSWORD
+    username = os.environ.get("ADMIN_USERNAME", "").strip()
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    if not password:
+        if not sys.stdin.isatty():
+            print("ADMIN_PASSWORD غير مضبوط ولا يوجد طرفية تفاعلية.", file=sys.stderr)
+            return 2
+        import getpass
+        username = input(f"اسم المستخدم [{username or 'admin'}]: ").strip() or username or "admin"
+        password = getpass.getpass("كلمة المرور الجديدة: ")
+        if password != getpass.getpass("أعد كتابة كلمة المرور: "):
+            print("كلمتا المرور غير متطابقتين.", file=sys.stderr)
+            return 2
+    username = username or "admin"
+    if len(password) < MIN_PASSWORD:
+        print(f"كلمة المرور يجب ألا تقل عن {MIN_PASSWORD} خانة.", file=sys.stderr)
+        return 2
+    ADMIN_USERNAME, ADMIN_PASSWORD = username, password
+    init_db()
+    with connect_db() as conn:
+        result = sync_admin_credentials(conn, username, password, force=True)
+    if result["status"] != "updated":
+        print(f"تعذر التحديث: {result.get('reason')}", file=sys.stderr)
+        return 1
+    print(f"تم تحديث حساب المدير — المستخدم: {username}")
+    return 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] in ("export-sql", "restore"):
         sys.exit(run_cli(sys.argv[1:]))
@@ -2233,7 +2427,13 @@ if __name__ == "__main__":
         for path in backup_data(BACKUP_KEEP):
             print(path)
         sys.exit(0)
+    if len(sys.argv) > 1 and sys.argv[1] == "set-admin":
+        sys.exit(run_set_admin())
     first_run_password = init_db()
+    if ADMIN_SYNC_RESULT.get("status") == "updated":
+        print(f"تمت مزامنة بيانات المدير من متغيرات البيئة — المستخدم: {ADMIN_SYNC_RESULT['username']}", flush=True)
+    elif ADMIN_SYNC_RESULT.get("reason") in ("weak_password", "username_taken"):
+        print(f"تحذير: لم تُطبَّق بيانات المدير من البيئة ({ADMIN_SYNC_RESULT['reason']}). كلمة المرور تتطلب {MIN_PASSWORD} خانة على الأقل.", file=sys.stderr, flush=True)
     try:
         sweep_orphan_uploads()
     except Exception:

@@ -195,6 +195,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await sp.waitForSelector('#adminBar:not([hidden])');
       assert.ok((await sp.getAttribute('#adminBar a', 'href')).startsWith('/admin/#products/new'));
       await sp.fill('#searchInput', 'ستارة اختبار الرفع').catch(async () => { await sp.click('#searchToggle'); await sp.fill('#searchInput', 'ستارة اختبار الرفع'); });
+      await sp.locator('#searchInput').blur(); // the suggestion list would cover the card
       await sp.locator('.quick-add').first().click({ force: true });
       await sp.waitForSelector('#productModal.open');
       assert.strictEqual(await sp.locator('.gthumb').count(), 2);
@@ -539,6 +540,447 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await follow(vp, () => vp.press('#searchInput', 'Enter'));
       assert.deepStrictEqual(pathAndQ(vp.url()), ['/products', null]);
     })();
+    // ------------------------------------------------------------ storefront v2: skeletons, suggestions, filters, recents, wishlist, cart, order flow, galleries, install, offline
+    const toNum = t => Number(String(t).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d]/g, ''));
+    const SOLD_OUT = 'ستارة نفدت للاختبار';
+    let soldOut = null;
+    // the page scrolls smoothly: bring the card into view at once so the click lands where the button really is
+    const quickView = async loc => { await loc.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })); await loc.click({ force: true }); };
+    const desktopCtx = async (extra = {}) => { const c = await browser.newContext({ viewport: { width: 1366, height: 800 }, locale: 'ar-SA', ...extra }); await c.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }).catch(() => {}); return c; };
+    const layoutShift = pg => pg.evaluate(() => new Promise(res => { let v = 0; new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) v += e.value; }).observe({ type: 'layout-shift', buffered: true }); setTimeout(() => res(v), 2200); }));
+
+    await check('setup: a sold-out product (stock 0) exists for the availability filter', async () => {
+      const made = await ap.evaluate(name => api('/api/admin/products', { method: 'POST', body: { name, category: 'curtains', price: 120, stock: 0, active: true, description: 'منتج نفد للاختبار', image: '/assets/wavy-04.jpg' } }), SOLD_OUT);
+      soldOut = made.product;
+      assert.ok(soldOut && soldOut.id && Number(soldOut.stock) === 0, JSON.stringify(made));
+    })();
+
+    await check('loading shows skeleton cards (aria-busy, hidden from screen readers), then real products; images fade in; reserved space (little layout shift)', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'skeleton');
+      await pg.route('**/api/products', async route => { await sleep(900); await route.continue(); });
+      await pg.goto(base + '/');
+      await pg.waitForSelector('#productGrid .product-card.skeleton');
+      assert.strictEqual(await pg.getAttribute('#productGrid', 'aria-busy'), 'true');
+      const skels = await pg.locator('#productGrid .product-card.skeleton').count();
+      assert.ok(skels >= 4, 'skeleton cards: ' + skels);
+      assert.strictEqual(await pg.locator('#productGrid .product-card.skeleton[aria-hidden="true"]').count(), skels);
+      assert.ok(await pg.locator('#categoryGrid .category-card.skeleton').count() >= 1, 'category placeholders');
+      await catalogReady(pg);
+      assert.strictEqual(await pg.locator('.skeleton').count(), 0, 'skeletons are replaced');
+      assert.strictEqual(await pg.getAttribute('#productGrid', 'aria-busy'), null);
+      await pg.$$eval('img.product-image', imgs => imgs.forEach(i => { i.loading = 'eager'; }));
+      await pg.waitForFunction(() => [...document.querySelectorAll('img.product-image')].every(i => !i.classList.contains('fade-img') || i.classList.contains('is-loaded')));
+      const shift = await layoutShift(pg);
+      assert.ok(shift < 0.15, 'cumulative layout shift ' + shift.toFixed(3));
+      await ctx.close();
+      const m = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ar-SA', isMobile: true, hasTouch: true, serviceWorkers: 'block' }); const mpg = await m.newPage();
+      await mpg.goto(base + '/'); await catalogReady(mpg);
+      const mshift = await layoutShift(mpg);
+      assert.ok(mshift < 0.15, 'phone layout shift ' + mshift.toFixed(3));
+      assert.ok(await mpg.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no horizontal scroll on the phone home page');
+      await m.close();
+    })();
+
+    await check('hero: real <img> with fetchpriority=high that loads, category shortcut chips; reduced motion stops the hero motion', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); await pg.goto(base + '/'); await catalogReady(pg);
+      assert.strictEqual(await pg.getAttribute('.hero-bg', 'fetchpriority'), 'high');
+      assert.ok(await pg.$eval('.hero-bg', i => i.complete && i.naturalWidth > 0), 'hero image decoded');
+      const chips = await pg.$$eval('#heroChips a', as => as.map(a => a.getAttribute('href')));
+      assert.strictEqual(chips.length, await pg.locator('#categoryGrid .category-card').count(), 'one shortcut per visible category');
+      assert.ok(chips.every(h => h.startsWith('/category/')), chips.join());
+      assert.notStrictEqual(await pg.$eval('.hero-bg', el => getComputedStyle(el).animationName), 'none', 'ken-burns runs by default');
+      await ctx.close();
+      const calm = await desktopCtx({ reducedMotion: 'reduce', serviceWorkers: 'block' }); const cp = await calm.newPage(); await cp.goto(base + '/'); await catalogReady(cp);
+      assert.strictEqual(await cp.$eval('.hero-bg', el => getComputedStyle(el).animationName), 'none');
+      assert.strictEqual(await cp.$eval('.hero h1', el => getComputedStyle(el).animationName), 'none');
+      await calm.close();
+    })();
+
+    await check('search: debounced suggestions (combobox), Arabic-aware matching, highlight, arrow keys + Enter, Escape', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'suggest'); await pg.goto(base + '/'); await catalogReady(pg);
+      assert.strictEqual(await pg.getAttribute('#searchInput', 'role'), 'combobox');
+      assert.strictEqual(await pg.getAttribute('#searchInput', 'aria-expanded'), 'false');
+      await pg.fill('#searchInput', 'ويفي');
+      await pg.waitForSelector('#searchSuggest:not([hidden])');
+      assert.strictEqual(await pg.getAttribute('#searchInput', 'aria-expanded'), 'true');
+      const options = pg.locator('#searchSuggest [role=option]');
+      const n = await options.count();
+      assert.ok(n >= 3 && n <= 6, 'up to five products plus "show all": ' + n);
+      assert.ok(await pg.locator('#searchSuggest .suggest-item mark').count() >= 1, 'the matched word is highlighted');
+      assert.ok((await options.last().textContent()).includes('عرض كل النتائج'));
+      assert.ok((await pg.textContent('#searchStatus')).includes('مطابقة'), 'result count announced');
+      await pg.keyboard.press('ArrowDown'); await pg.keyboard.press('ArrowDown');
+      const active = await pg.getAttribute('#searchInput', 'aria-activedescendant');
+      assert.strictEqual(active, 'sg-1');
+      assert.strictEqual(await pg.getAttribute('#' + active, 'aria-selected'), 'true');
+      assert.strictEqual(await pg.locator('#searchSuggest [aria-selected="true"]').count(), 1);
+      await pg.keyboard.press('ArrowUp'); await pg.keyboard.press('ArrowUp'); // up from the first option wraps to the last one
+      assert.strictEqual(await pg.getAttribute('#searchInput', 'aria-activedescendant'), 'sg-all');
+      await pg.keyboard.press('Escape');
+      assert.strictEqual(await pg.locator('#searchSuggest:not([hidden])').count(), 0, 'Escape closes the list');
+      assert.strictEqual(await pg.inputValue('#searchInput'), 'ويفي', 'and keeps the text');
+      // Arabic variants: ئ/ي and diacritics find «ستائر»
+      for (const variant of ['ستاير', 'سِتَائِر', 'ستائر']) {
+        await pg.fill('#searchInput', variant);
+        await pg.waitForSelector('#searchSuggest:not([hidden]) .suggest-item');
+      }
+      await pg.fill('#searchInput', 'ويفي');
+      await pg.waitForSelector('#searchSuggest:not([hidden]) .suggest-item');
+      await pg.keyboard.press('ArrowDown');
+      const href = await pg.getAttribute('#sg-0', 'data-href');
+      await Promise.all([pg.waitForURL(u => u.pathname.startsWith('/product/')), pg.keyboard.press('Enter')]);
+      assert.strictEqual(new URL(pg.url()).pathname, href);
+      // nothing found
+      await pg.goto(base + '/about'); await catalogReady(pg);
+      await pg.fill('#searchInput', 'لا-يوجد-منتج-بهذا-الاسم');
+      await pg.waitForSelector('#searchSuggest .suggest-empty');
+      assert.strictEqual(await pg.getAttribute('#searchInput', 'aria-activedescendant'), null);
+      // the results list highlights the term too, and the typed phrase sorts best matches first
+      await pg.goto(base + '/products?q=' + encodeURIComponent('ستاير')); await catalogReady(pg);
+      assert.ok(await pg.locator('#productGrid .product-name mark').count() >= 1, 'highlight in the product names');
+      await ctx.close();
+    })();
+
+    await check('filters: sort + "available only" + category live in the URL (shareable, restored on reload), clear button, newest first', async () => {
+      const all = await apiProducts();
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'filters');
+      await pg.goto(base + '/products?sort=low&stock=1'); await catalogReady(pg);
+      assert.strictEqual(await pg.inputValue('#sortSelect'), 'low');
+      assert.ok(await pg.isChecked('#stockOnly'));
+      assert.ok(await pg.isVisible('#clearFilters'));
+      const inStock = all.filter(p => p.stock > 0);
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), inStock.length);
+      assert.ok(!(await pg.textContent('#productGrid')).includes(SOLD_OUT), 'the sold-out product is hidden by "available only"');
+      const prices = await pg.$$eval('#productGrid .product-card', cs => cs.map(c => c.querySelector('.product-price').textContent.includes('حسب الطلب') ? Infinity : Number(c.querySelector('.product-price').textContent.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d]/g, ''))));
+      assert.deepStrictEqual(prices, [...prices].sort((a, b) => a - b), 'cheapest first, "price on request" last');
+      await pg.click('#filterList [data-filter="blinds"]');
+      await pg.waitForFunction(() => new URLSearchParams(location.search).get('cat') === 'blinds');
+      assert.deepStrictEqual([...new URL(pg.url()).searchParams.keys()].sort(), ['cat', 'sort', 'stock']);
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), inStock.filter(p => p.category === 'blinds').length);
+      await pg.reload(); await catalogReady(pg);
+      assert.strictEqual(await pg.getAttribute('#filterList [data-filter="blinds"]', 'aria-pressed'), 'true', 'the category chip is restored');
+      assert.strictEqual(await pg.inputValue('#sortSelect'), 'low');
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), inStock.filter(p => p.category === 'blinds').length);
+      await pg.click('#clearFilters');
+      assert.strictEqual(new URL(pg.url()).search, '', 'clearing resets the address');
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), all.length);
+      assert.ok(await pg.isHidden('#clearFilters'));
+      await pg.selectOption('#sortSelect', 'newest');
+      assert.strictEqual((await pg.locator('#productGrid .product-name').first().textContent()).trim(), SOLD_OUT, 'newest product first');
+      assert.strictEqual(new URL(pg.url()).searchParams.get('sort'), 'newest');
+      await pg.goto(base + '/products?cat=%D9%84%D8%A7-%D9%8A%D9%88%D8%AC%D8%AF'); await catalogReady(pg); // unknown category falls back to all
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), all.length);
+      assert.ok(await pg.locator('#productGrid .no-results').count() === 0);
+      await pg.goto(base + '/category/curtains?stock=1'); await catalogReady(pg); // category pages keep sort/availability too
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), inStock.filter(p => p.category === 'curtains').length);
+      await ctx.close();
+    })();
+
+    await check('recently viewed: quick views and product pages are remembered (newest first), the current product is left out, "clear" empties it', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'recent'); await pg.goto(base + '/'); await catalogReady(pg);
+      assert.strictEqual(await pg.locator('#recentSection').count(), 0, 'nothing before anything was viewed');
+      const names = [];
+      for (const i of [0, 1]) {
+        const card = pg.locator('#productGrid .product-card').nth(i);
+        names.push((await card.locator('.product-name').textContent()).trim());
+        await quickView(card.locator('.quick-add'));
+        await pg.waitForSelector('#productModal.open');
+        await pg.keyboard.press('Escape');
+        await pg.waitForFunction(() => !document.querySelector('#productModal.open'));
+      }
+      await pg.waitForSelector('#recentSection .recent-item');
+      assert.deepStrictEqual(await pg.$$eval('#recentSection .recent-item b', bs => bs.map(b => b.textContent.trim())), [names[1], names[0]]);
+      assert.strictEqual(await pg.evaluate(() => JSON.parse(localStorage.getItem('fakhama-recent-v1')).length), 2);
+      assert.strictEqual(await pg.getAttribute('#recentSection', 'aria-labelledby'), 'recentTitle');
+      await pg.reload(); await catalogReady(pg);
+      await pg.waitForSelector('#recentSection .recent-item');
+      assert.strictEqual(await pg.locator('#recentSection .recent-item').count(), 2, 'persists across visits');
+      await Promise.all([pg.waitForNavigation(), pg.click('#recentSection .recent-item a >> nth=1')]);
+      await catalogReady(pg);
+      assert.strictEqual((await pg.textContent('#productTitle')).trim(), names[0]);
+      await pg.waitForSelector('#recentSection .recent-item');
+      assert.deepStrictEqual(await pg.$$eval('#recentSection .recent-item b', bs => bs.map(b => b.textContent.trim())), [names[1]], 'the product being viewed is not listed');
+      await pg.click('#clearRecent');
+      await pg.waitForFunction(() => !document.querySelector('#recentSection'));
+      assert.strictEqual(await pg.evaluate(() => localStorage.getItem('fakhama-recent-v1')), null);
+      await ctx.close();
+    })();
+
+    await check('wishlist: accessible toggle (stable name + aria-pressed), persists, syncs across tabs and the quick view, /products?favorites=1', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'wishlist'); await pg.goto(base + '/'); await catalogReady(pg);
+      const heart = pg.locator('#productGrid .favorite-btn').first();
+      const label = await heart.getAttribute('aria-label');
+      assert.ok(label.startsWith('المفضلة: '), label);
+      assert.strictEqual(await heart.getAttribute('aria-pressed'), 'false');
+      await heart.click();
+      assert.strictEqual(await heart.getAttribute('aria-pressed'), 'true');
+      assert.strictEqual(await heart.getAttribute('aria-label'), label, 'the accessible name does not flip with the state');
+      await toastSays(pg, 'أُضيف إلى المفضلة');
+      assert.strictEqual((await pg.textContent('#favCount')).trim(), '1');
+      await pg.reload(); await catalogReady(pg);
+      assert.strictEqual(await pg.locator('#productGrid .favorite-btn').first().getAttribute('aria-pressed'), 'true', 'persisted');
+      const pg2 = await ctx.newPage(); await pg2.goto(base + '/'); await catalogReady(pg2);
+      await pg2.locator('#productGrid .favorite-btn').nth(1).click();
+      await pg.waitForFunction(() => document.querySelector('#favCount').textContent.trim() === '2'); // storage event
+      assert.strictEqual(await pg.locator('#productGrid .favorite-btn').nth(1).getAttribute('aria-pressed'), 'true');
+      // quick view has its own heart, in sync with the grid
+      await quickView(pg.locator('#productGrid .quick-add').first());
+      await pg.waitForSelector('#productModal.open');
+      assert.strictEqual(await pg.getAttribute('#productModal .favorite-btn', 'aria-pressed'), 'true');
+      await pg.click('#productModal .favorite-btn');
+      assert.strictEqual(await pg.getAttribute('#productModal .favorite-btn', 'aria-pressed'), 'false');
+      assert.strictEqual(await pg.locator('#productGrid .favorite-btn').first().getAttribute('aria-pressed'), 'false', 'the grid follows');
+      await pg.keyboard.press('Escape'); await pg.waitForFunction(() => !document.querySelector('#productModal.open'));
+      await pg.goto(base + '/products?favorites=1'); await catalogReady(pg);
+      assert.strictEqual(await pg.locator('#productGrid .product-card').count(), 1);
+      await pg2.close(); await ctx.close();
+    })();
+
+    await check('cart drawer: quantity steppers, line totals, limit at stock (aria-disabled + hint), undo after removing, honest "price on request" subtotal', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'cart'); await pg.goto(base + '/'); await catalogReady(pg);
+      const stock = Number(galleryProduct.stock);
+      await pg.fill('#searchInput', GALLERY_NAME);
+      await pg.waitForFunction(() => document.querySelectorAll('#productGrid .product-card').length === 1);
+      await pg.locator('#searchInput').blur(); // leave the field: the suggestion list would cover the card
+      await quickView(pg.locator('#productGrid .quick-add'));
+      await pg.waitForSelector('#productModal.open');
+      for (let i = 1; i < stock; i++) await pg.click('[data-mqty="1"]');
+      assert.strictEqual((await pg.textContent('#modalQty')).trim(), String(stock));
+      await pg.click('[data-mqty="1"]'); // already at the limit
+      await toastSays(pg, 'الكمية المتاحة');
+      assert.strictEqual((await pg.textContent('#modalQty')).trim(), String(stock));
+      await pg.click('[data-mqty="-1"]'); await pg.click('[data-mqty="-1"]'); // two pieces
+      await pg.click('[data-modal-add]');
+      await pg.waitForFunction(() => !document.querySelector('#productModal.open'));
+      await pg.click('#cartOpen'); await pg.waitForSelector('#cartDrawer.open');
+      assert.strictEqual(toNum(await pg.textContent('#cartDrawer .cart-line .line-total')), 450 * (stock - 2), 'line total = unit price x quantity');
+      assert.strictEqual(toNum(await pg.textContent('#cartSubtotal')), 450 * (stock - 2));
+      assert.ok((await pg.textContent('#subtotalLabel')).includes('قبل التوصيل'));
+      assert.strictEqual(await pg.locator('#pendingNote:not([hidden])').count(), 0, 'no pending note while every item has a price');
+      // + up to the limit
+      const plus = pg.locator('#cartItems [data-change="1"]');
+      for (let i = 0; i < 2; i++) { await plus.click(); assert.ok(await pg.evaluate(() => document.activeElement.dataset.change === '1'), 'keyboard focus stays on the stepper'); }
+      assert.strictEqual(await plus.getAttribute('aria-disabled'), 'true');
+      assert.ok((await pg.textContent('#cartItems .stock-hint')).includes('أقصى كمية'));
+      await plus.click({ force: true }); await toastSays(pg, 'الكمية المتاحة'); // aria-disabled, not disabled: the button keeps keyboard focus
+      assert.strictEqual((await pg.textContent('#cartItems output')).trim(), String(stock));
+      // remove → undo
+      await pg.click('#cartItems [data-remove]');
+      await pg.waitForSelector('#cartItems .undo-bar');
+      assert.ok((await pg.textContent('#cartItems')).includes('سلتك بانتظار اختيارك'));
+      await pg.click('#cartItems [data-undo]');
+      await pg.waitForSelector('#cartItems .cart-line');
+      assert.strictEqual((await pg.textContent('#cartItems output')).trim(), String(stock), 'quantity restored');
+      assert.strictEqual(await pg.evaluate(() => JSON.parse(localStorage.getItem('fakhama-cart-v1')).reduce((s, i) => s + i.qty, 0)), stock);
+      // a made-to-order piece: not priced, said plainly
+      await pg.click('#cartClose'); await pg.waitForFunction(() => !document.querySelector('#cartDrawer.open'));
+      await pg.waitForSelector('#drawerOverlay', { state: 'hidden' }); // its fade-out would otherwise take the next click
+      await pg.fill('#searchInput', 'FAL-WAV-005');
+      await pg.waitForFunction(() => document.querySelectorAll('#productGrid .product-card').length === 1);
+      await pg.locator('#searchInput').blur();
+      await quickView(pg.locator('#productGrid .quick-add'));
+      await pg.waitForSelector('#productModal.open'); await pg.click('[data-modal-add]');
+      await pg.click('#cartOpen'); await pg.waitForSelector('#cartDrawer.open');
+      const note = await pg.textContent('#pendingNote');
+      assert.ok(await pg.isVisible('#pendingNote') && note.includes('حسب الطلب') && note.includes('لا يدخل في المجموع'), note);
+      const sub = await pg.textContent('#cartSubtotal');
+      assert.ok(sub.includes('حسب الطلب') && toNum(sub) === 450 * stock, 'known part + "price on request": ' + sub);
+      assert.ok((await pg.textContent('#subtotalLabel')).includes('المسعّرة فقط'));
+      assert.ok((await pg.textContent('#cartTotal')).includes('حسب الطلب'));
+      assert.strictEqual(await pg.locator('#cartItems .line-total').count(), 1, 'only the priced line shows a total');
+      await pg.screenshot({ path: path.join(SHOTS, '30-cart-desktop.png') });
+      await ctx.close();
+    })();
+
+    await check('order flow: summary, inline validation (aria-invalid, messages, focus), Arabic digits accepted, server error shown inline, confirmation panel with order number', async () => {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ar-SA', isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+      await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }).catch(() => {});
+      const pg = await ctx.newPage(); watch(pg, 'order', ['/api/orders']); await pg.goto(base + '/'); await catalogReady(pg); // the 400 below is the point of one step
+      await pg.evaluate(id => addToCart(id, 2), galleryProduct.id);
+      await pg.click('#cartOpen'); await pg.click('#checkoutBtn'); await pg.waitForSelector('#orderModal.open');
+      assert.strictEqual(await pg.locator('#orderSteps li[aria-current="step"]').textContent(), '٢بياناتك');
+      const summary = await pg.textContent('#orderSummary');
+      assert.ok(summary.includes(GALLERY_NAME) && summary.includes('الإجمالي التقديري') && toNum(summary.replace(GALLERY_NAME, '').replace(/[×]\s*[٠-٩\d]+/, '')) >= 900, summary);
+      // empty submit: summary alert, first invalid field focused, one message per field
+      await pg.click('#orderForm button[type=submit]');
+      assert.ok(await pg.isVisible('#orderAlert'), 'error summary');
+      assert.strictEqual(await pg.evaluate(() => document.activeElement.id), 'customerName');
+      for (const id of ['customerName', 'customerPhone', 'orderConsent']) assert.strictEqual(await pg.getAttribute('#' + id, 'aria-invalid'), 'true', id);
+      assert.strictEqual(await pg.getAttribute('#customerCity', 'aria-invalid'), null, 'the city is pre-filled and valid');
+      assert.ok((await pg.textContent('#customerNameError')).includes('الاسم'));
+      assert.ok((await pg.textContent('#customerPhoneError')).includes('رقم الجوال'));
+      assert.ok((await pg.textContent('#orderConsentError')).includes('الخصوصية'));
+      assert.ok((await pg.getAttribute('#customerPhone', 'aria-describedby')).includes('customerPhoneError'));
+      await pg.screenshot({ path: path.join(SHOTS, '31-order-errors-mobile.png') });
+      // each message goes away as soon as the value is right; a Saudi number must be 05 + 8 digits
+      await pg.fill('#customerName', 'ع'); await pg.locator('#customerName').blur();
+      assert.ok((await pg.textContent('#customerNameError')).includes('حرفان'));
+      await pg.fill('#customerName', 'عميل اختبار الطلب');
+      assert.strictEqual(await pg.getAttribute('#customerName', 'aria-invalid'), null);
+      assert.ok(await pg.isHidden('#customerNameError'));
+      await pg.fill('#customerPhone', '055123456'); await pg.locator('#customerPhone').blur();
+      assert.ok((await pg.textContent('#customerPhoneError')).includes('05'), await pg.textContent('#customerPhoneError'));
+      await pg.fill('#customerPhone', '123'); await pg.locator('#customerPhone').blur();
+      assert.ok((await pg.textContent('#customerPhoneError')).includes('غير صحيح'));
+      await pg.fill('#customerPhone', '٠٥٥١٢٣٤٥٦٧');
+      assert.ok(await pg.isHidden('#customerPhoneError'), 'Arabic-Indic digits are accepted');
+      await pg.check('#orderConsent');
+      assert.ok(await pg.isHidden('#orderConsentError'));
+      // a server-side refusal is shown inside the dialog (and the form keeps what was typed)
+      await pg.route('**/api/orders', route => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'تحقق من رقم الجوال.' }) }));
+      await pg.click('#orderForm button[type=submit]');
+      await pg.waitForFunction(() => document.querySelector('#orderAlert').textContent.includes('تحقق من رقم الجوال'));
+      assert.strictEqual(await pg.inputValue('#customerName'), 'عميل اختبار الطلب');
+      assert.strictEqual(await pg.locator('#orderAlert').evaluate(el => el === document.activeElement), true, 'the alert takes focus');
+      await pg.unroute('**/api/orders');
+      await pg.click('#orderForm button[type=submit]');
+      await pg.waitForSelector('#orderDone:not([hidden])');
+      const number = (await pg.textContent('#orderDone bdi')).trim();
+      assert.match(number, /^MH-\d{6}-\d{5}$/);
+      assert.strictEqual((await pg.textContent('#orderTitle')).trim(), 'تم تسجيل طلبك');
+      assert.strictEqual(await pg.evaluate(() => document.activeElement.id), 'orderTitle', 'focus moves to the confirmation heading');
+      assert.ok(await pg.isHidden('#orderBody'));
+      assert.strictEqual(await pg.locator('#orderSteps li.done').count(), 3);
+      assert.strictEqual(await pg.locator('#orderSteps li[aria-current="step"]').textContent(), '٣التأكيد');
+      assert.strictEqual(await pg.evaluate(() => JSON.parse(localStorage.getItem('fakhama-cart-v1') || '[]').length), 0, 'cart cleared');
+      const stored = await ap.evaluate(num => api('/api/admin/orders').then(r => JSON.stringify(r).includes(num) ? JSON.stringify(r) : ''), number);
+      assert.ok(stored.includes('0551234567'), 'the order reached the admin with Latin digits');
+      await pg.click('[data-copy-order]');
+      await toastSays(pg, 'تم نسخ رقم الطلب');
+      assert.strictEqual(await pg.evaluate(() => navigator.clipboard.readText()), number);
+      await pg.screenshot({ path: path.join(SHOTS, '32-order-done-mobile.png') });
+      await pg.click('[data-order-close]');
+      await pg.waitForFunction(() => !document.querySelector('#orderModal.open'));
+      await pg.evaluate(id => addToCart(id, 1), galleryProduct.id); await pg.click('#cartOpen'); await pg.click('#checkoutBtn');
+      assert.ok(await pg.isVisible('#orderBody') && await pg.isHidden('#orderDone'), 'the form is back for the next order');
+      assert.strictEqual(await pg.inputValue('#customerName'), '', 'nothing from the last order is kept');
+      await ctx.close();
+    })();
+
+    await check('product page gallery: arrows + counter, swipe, tap-to-zoom, zoom button, Escape leaves the zoom, arrow keys', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'gallery');
+      await pg.goto(base + '/product/' + encodeURIComponent(galleryProduct.slug)); await catalogReady(pg);
+      const [first, second] = galleryProduct.images.map(i => i.url);
+      const src = () => pg.getAttribute('#pageGalleryMain', 'src');
+      const at = s => pg.waitForFunction(v => document.querySelector('#pageGalleryMain').getAttribute('src') === v, s);
+      assert.strictEqual(await pg.locator('.gnav').count(), 2);
+      assert.strictEqual((await pg.textContent('#pageGalleryCount')).trim(), '١ من ٢');
+      await pg.click('.gnav-next'); await at(second);
+      assert.strictEqual((await pg.textContent('#pageGalleryCount')).trim(), '٢ من ٢');
+      assert.strictEqual(await pg.getAttribute('[data-page-gindex="1"]', 'aria-pressed'), 'true');
+      await pg.click('.gnav-next'); await at(first); // wraps
+      const box = await pg.locator('.product-gallery-main').boundingBox();
+      const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+      const swipe = async dx => { await pg.mouse.move(cx, cy); await pg.mouse.down(); await pg.mouse.move(cx + dx / 2, cy + 4, { steps: 4 }); await pg.mouse.move(cx + dx, cy + 6, { steps: 4 }); await pg.mouse.up(); };
+      await swipe(-140); await at(second); // RTL: swipe towards the left = next photo
+      await swipe(140); await at(first);
+      assert.strictEqual(await pg.locator('.product-gallery-main.is-zoomed').count(), 0, 'a swipe does not zoom');
+      await pg.mouse.click(cx, cy);
+      await pg.waitForSelector('.product-gallery-main.is-zoomed');
+      assert.strictEqual(await pg.getAttribute('.product-gallery-main [data-zoom-toggle]', 'aria-pressed'), 'true');
+      await swipe(-140);
+      assert.strictEqual(await src(), first, 'no swipe navigation while zoomed');
+      await pg.keyboard.press('Escape');
+      await pg.waitForFunction(() => !document.querySelector('.product-gallery-main.is-zoomed'));
+      await pg.click('.product-gallery-main [data-zoom-toggle]');
+      assert.strictEqual(await pg.locator('.product-gallery-main.is-zoomed').count(), 1);
+      await pg.click('.product-gallery-main [data-zoom-toggle]');
+      assert.strictEqual(await pg.locator('.product-gallery-main.is-zoomed').count(), 0);
+      await pg.focus('.gnav-next'); await pg.keyboard.press('ArrowLeft'); await at(second);
+      await pg.keyboard.press('ArrowRight'); await at(first);
+      await ctx.close();
+    })();
+
+    await check('quick view gallery: arrows, thumbnails, zoom; first Escape leaves the zoom and only the second closes the dialog; blur-up placeholder is the thumbnail', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'quickview'); await pg.goto(base + '/'); await catalogReady(pg);
+      await pg.fill('#searchInput', GALLERY_NAME);
+      await pg.waitForFunction(() => document.querySelectorAll('#productGrid .product-card').length === 1);
+      await pg.locator('#searchInput').blur(); // leave the field: the suggestion list would cover the card
+      await quickView(pg.locator('#productGrid .quick-add'));
+      await pg.waitForSelector('#productModal.open');
+      const [first, second] = galleryProduct.images;
+      assert.ok((await pg.getAttribute('#galleryStage', 'style')).includes(first.thumb), 'the thumbnail is the placeholder behind the full photo');
+      const at = s => pg.waitForFunction(v => document.querySelector('#galleryMain').getAttribute('src') === v, s);
+      await pg.click('#productModal .gnav-next'); await at(second.url);
+      assert.strictEqual((await pg.textContent('#galleryCount')).trim(), '٢ من ٢');
+      assert.ok((await pg.getAttribute('#galleryStage', 'style')).includes(second.thumb));
+      assert.ok((await pg.textContent('#galleryStatus')).includes('الصورة'), 'announced to screen readers');
+      await pg.click('#productModal .gnav-prev'); await at(first.url);
+      await pg.keyboard.press('ArrowLeft'); await at(second.url); // existing keyboard support still works
+      await pg.click('#productModal [data-zoom-toggle]');
+      assert.strictEqual(await pg.locator('#galleryStage.is-zoomed').count(), 1);
+      await pg.keyboard.press('Escape');
+      assert.strictEqual(await pg.locator('#galleryStage.is-zoomed').count(), 0);
+      assert.strictEqual(await pg.locator('#productModal.open').count(), 1, 'the dialog stays open');
+      await pg.keyboard.press('Escape');
+      await pg.waitForFunction(() => !document.querySelector('#productModal.open'));
+      await ctx.close();
+    })();
+
+    await check('install the app: dismissible card after the delay, footer link, native prompt, snooze for two weeks; none inside the Android app', async () => {
+      const ctx = await desktopCtx({ serviceWorkers: 'block' });
+      await ctx.addInitScript(() => { window.__installDelayMs = 150; });
+      const pg = await ctx.newPage(); watch(pg, 'install'); await pg.goto(base + '/'); await catalogReady(pg);
+      const fire = () => pg.evaluate(() => { const e = new Event('beforeinstallprompt', { cancelable: true }); e.prompt = async () => { window.__prompted = (window.__prompted || 0) + 1; }; e.userChoice = Promise.resolve({ outcome: 'accepted' }); window.dispatchEvent(e); return e.defaultPrevented; });
+      assert.ok(await pg.isHidden('#installLink'), 'no link before the browser offers installation');
+      assert.strictEqual(await fire(), true, 'the default mini-infobar is replaced by our UI');
+      await pg.waitForSelector('.install-card');
+      assert.strictEqual(await pg.getAttribute('.install-card', 'role'), 'region');
+      assert.ok((await pg.textContent('.install-card h2')).includes('ثبّت'));
+      assert.ok(await pg.isVisible('#installLink'));
+      await pg.screenshot({ path: path.join(SHOTS, '33-install-card-desktop.png') });
+      await pg.click('[data-install-later]');
+      assert.strictEqual(await pg.locator('.install-card').count(), 0);
+      assert.ok(Number(await pg.evaluate(() => localStorage.getItem('fakhama-install-v1'))) > 0, 'snoozed');
+      await pg.reload(); await catalogReady(pg);
+      await fire(); await pg.waitForTimeout(500);
+      assert.strictEqual(await pg.locator('.install-card').count(), 0, 'not shown again during the snooze');
+      assert.ok(await pg.isVisible('#installLink'), 'but the footer link still offers it');
+      await pg.click('#installLink');
+      await pg.waitForFunction(() => window.__prompted === 1);
+      await pg.waitForFunction(() => document.querySelector('#installLink').hidden);
+      await ctx.close();
+      const app = await desktopCtx({ serviceWorkers: 'block', userAgent: 'Mozilla/5.0 (Linux; Android 14) AlfakhamahApp/1.0' });
+      await app.addInitScript(() => { window.__installDelayMs = 50; });
+      const ap2 = await app.newPage(); await ap2.goto(base + '/'); await catalogReady(ap2);
+      await ap2.evaluate(() => { const e = new Event('beforeinstallprompt', { cancelable: true }); window.dispatchEvent(e); });
+      await ap2.waitForTimeout(400);
+      assert.strictEqual(await ap2.locator('.install-card').count(), 0);
+      assert.ok(await ap2.isHidden('#installLink'));
+      await app.close();
+    })();
+
+    await check('connection notices (offline / back online); the service worker caches only public site files (incl. the new script + styles) and never API/admin/uploads', async () => {
+      const ctx = await desktopCtx(); const pg = await ctx.newPage(); watch(pg, 'network'); await pg.goto(base + '/'); await catalogReady(pg);
+      await pg.evaluate(async () => { await navigator.serviceWorker.ready; });
+      await pg.reload(); await catalogReady(pg);
+      await pg.waitForFunction(async () => (await caches.keys()).length > 0);
+      const cached = await pg.evaluate(async () => { const out = []; for (const k of await caches.keys()) for (const r of await (await caches.open(k)).keys()) out.push(new URL(r.url).pathname); return out; });
+      assert.ok(cached.includes('/assets/js/plus.js') && cached.includes('/assets/css/plus.css') && cached.includes('/offline.html'), cached.join());
+      assert.ok(cached.every(p => /^\/(assets|icons)\//.test(p) || p === '/offline.html'), 'cache contains: ' + cached.join(','));
+      assert.ok((await pg.evaluate(() => caches.keys())).some(k => k === 'fakhama-static-v3'));
+      await ctx.setOffline(true);
+      await toastSays(pg, 'انقطع الاتصال');
+      await ctx.setOffline(false);
+      await toastSays(pg, 'عاد الاتصال');
+      await ctx.close();
+    })();
+
+    await check('no horizontal scroll at 360px on the home, products and product pages with the new controls', async () => {
+      const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, locale: 'ar-SA', isMobile: true, hasTouch: true, serviceWorkers: 'block' }); const pg = await ctx.newPage();
+      for (const url of ['/', '/products?stock=1&sort=low', '/product/' + encodeURIComponent(galleryProduct.slug), '/category/blinds']) {
+        await pg.goto(base + url); await catalogReady(pg); await pg.waitForTimeout(400);
+        const over = await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+        assert.ok(over <= 0, url + ' overflows by ' + over + 'px');
+      }
+      await ctx.close();
+    })();
+
+    await check('cleanup: the sold-out helper product is removed again', async () => {
+      await ap.evaluate(id => api('/api/admin/products/' + id, { method: 'DELETE' }), soldOut.id);
+      assert.ok(!(await apiProducts()).some(p => p.id === soldOut.id));
+    })();
+
     await visitor.close();
     await mobile.close();
     await check('admin categories: add with image, reorder, edit, delete', async () => {
@@ -568,6 +1010,24 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await dl.goto(base + '/admin/#products/new');
       await dl.waitForSelector('#productForm', { timeout: 15000 });
       await dl.close();
+    })();
+    await check('admin dashboard: KPIs, charts with text alternatives, range switch persisted in the URL, no overflow at 360px', async () => {
+      await ap.evaluate(() => navigate('overview'));
+      await ap.waitForSelector('#dashBody [data-kpi="orders"]');
+      assert.strictEqual(await ap.locator('#dashBody [data-kpi]').count(), 8, 'eight KPI cards');
+      assert.strictEqual(await ap.locator('.range-btn[aria-pressed="true"]').count(), 1);
+      await ap.click('.range-btn[data-range="7"]');
+      await ap.waitForFunction(() => location.hash === '#overview/7' && document.querySelector('.range-btn[data-range="7"]').getAttribute('aria-pressed') === 'true');
+      await ap.waitForSelector('#dashBody [data-kpi="orders"]');
+      for (const id of ['chOrders', 'chVisits']) {
+        if (await ap.locator('#' + id).count()) assert.ok((await ap.getAttribute('#' + id, 'aria-label')).length > 10, id + ' has a text alternative');
+      }
+      assert.ok(await ap.locator('#dashBody table.sr-only, #dashBody .dash-empty').count() > 0, 'data table or empty state');
+      const vp = ap.viewportSize(); await ap.setViewportSize({ width: 360, height: 740 }); await ap.waitForTimeout(300);
+      const wide = await ap.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+      await ap.setViewportSize(vp);
+      assert.ok(wide <= 0, 'no horizontal scroll at 360px, overflow ' + wide);
+      await ap.evaluate(() => navigate('products'));
     })();
     await check('admin hides, edits and deletes a product', async () => {
       const row = ap.locator('#productsBody tr', { hasText: 'ستارة اختبار الرفع' });

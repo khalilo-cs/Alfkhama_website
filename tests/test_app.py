@@ -2452,7 +2452,8 @@ class RestoreTests(ServerCase):
                 self.assertIn("uploads/stray.png", zf.namelist())
             self.assertEqual(saved["tables"]["messages"], 0)
             # the restored store runs with the same admin password, data and photo
-            type(self).start_server(data_dir=self.data_dir, env={"ADMIN_PASSWORD": "ignored-for-an-existing-db"})
+            # (no ADMIN_PASSWORD in the environment: a set one would now be synced onto the admin, see test_credentials.py)
+            type(self).start_server(data_dir=self.data_dir, env={})
             cookie, _ = self.login()
             self.assertEqual(self.json("GET", "/api/store")[1]["tagline"], "عبارة قبل الاستعادة")
             self.assertEqual(self.req("GET", up["url"])[0], 200)

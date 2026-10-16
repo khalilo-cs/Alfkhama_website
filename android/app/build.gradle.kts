@@ -29,8 +29,8 @@ android {
         minSdk = 24 // Android 7.0+; CSV downloads go to the app's own folder below Android 10 (no storage permission)
         targetSdk = 36
         applicationId = "com.alfakhamah.store"
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
         buildConfigField("String", "SERVER_ORIGIN", "\"$serverOrigin\"")
         // One app for customers and the admin: it opens the storefront; the admin panel is reached from the
         // storefront footer or the "لوحة الإدارة" launcher shortcut and still requires the admin login.

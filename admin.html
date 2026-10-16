@@ -86,6 +86,12 @@
       .toast{font-size:12px}
     }
     /* readability-floor:end */
+    /* desktop floor: labels, badges and table text never below 12px; link-style buttons reach a 24px+ touch target */
+    .field label,.form-card label{font-size:13px}.form-card>p{font-size:12px}.form-card h3{font-size:14px}
+    .badge{font-size:11px}.data-table th{font-size:12px}.data-table td{font-size:13px}.stat-label,.stat-foot{font-size:12px}
+    .panel-head a,.panel-head button{min-height:32px;padding-inline:10px}.cat-view{display:inline-block;padding:6px 0}
+    input[type=checkbox]{width:24px;height:24px}
+    @media(max-width:760px){.search-control{flex:1 1 100%;min-width:0}.search-control input{height:42px}}
     /* luxe:start — same "night & champagne" identity as the storefront. Motion respects prefers-reduced-motion. */
     @font-face{font-family:"Messiri";font-style:normal;font-weight:500 600;font-display:swap;src:url(/assets/fonts/el-messiri-arabic-600-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+0870-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FEFC}
     @font-face{font-family:"Messiri";font-style:normal;font-weight:700 900;font-display:swap;src:url(/assets/fonts/el-messiri-arabic-700-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+0870-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FEFC}
@@ -271,6 +277,45 @@
     @media(max-width:900px){.stats-grid-2{grid-template-columns:1fr}}
     @media(max-width:760px){.vchart{height:170px}.vchart-label{font-size:11px}}
     /* analytics:end */
+
+    /* dashboard:start — landing view: KPI cards with trends, charts (vendored Chart.js), bar lists, alerts and quick actions */
+    .dash-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
+    .dash-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+    .period-switch .btn{min-height:44px}
+    .range-btn[aria-pressed=true]{background:var(--night);color:var(--gold-2);border-color:var(--night)}
+    .auto-toggle{display:inline-flex;align-items:center;gap:8px;min-height:44px;font-size:13px;cursor:pointer}
+    .auto-toggle input{width:20px;height:20px;accent-color:var(--olive-dark)}
+    .dash-body[aria-busy=true]{opacity:.7}
+    .kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
+    .kpi .stat-value{font-size:28px;line-height:1.3;overflow-wrap:anywhere}
+    .kpi-na{font-size:17px;color:var(--muted)}
+    .kpi-trend{display:inline-block;font-size:12.5px;font-weight:700;margin-top:2px;padding:2px 9px;border-radius:99px;background:#f3ead7}
+    .kpi-trend.up{color:#1f5f3a;background:#e4f1e8}.kpi-trend.down{color:#8f2f2b;background:#f9e5e3}.kpi-trend.flat{color:#4f493e}
+    .dash-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}
+    .dash-grid.wide{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}
+    .dash-panel{margin-bottom:16px;min-width:0}.dash-grid .dash-panel{margin-bottom:0}
+    .chart-box{position:relative;height:260px;width:100%}.chart-box.donut{height:190px;width:190px;flex:0 0 auto}
+    .chart-sum{font-size:13px;color:var(--muted);margin:10px 0 0}
+    .donut-wrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap;justify-content:center}
+    .donut-legend{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:13px;flex:1;min-width:150px}
+    .donut-legend li{display:flex;align-items:center;gap:8px}.donut-legend b{margin-inline-start:auto}
+    .swatch{width:14px;height:14px;border-radius:4px;flex:0 0 auto}
+    .dash-empty{margin:0;padding:22px 8px;text-align:center;color:var(--muted);font-size:14px}
+    .bar-list{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+    .bar-top{display:flex;justify-content:space-between;gap:10px;font-size:14px;align-items:baseline}.bar-name{min-width:0;overflow-wrap:anywhere}
+    .bar-track{display:block;height:10px;border-radius:99px;background:#f0e6d1;margin-top:6px;overflow:hidden}
+    .bar-fill{display:block;height:100%;border-radius:99px;background:#8f6a2c}
+    .recent-list{list-style:none;margin:0;padding:0}
+    .recent-list li{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}.recent-list li:last-child{border-bottom:0}
+    .rl-main{min-width:0;overflow-wrap:anywhere}.rl-act{flex:0 0 auto}
+    .rl-act .status-select{min-height:44px;max-width:150px}
+    .low-list li{flex-wrap:wrap}.low-actions{display:flex;align-items:center;gap:10px}
+    .skel-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}.skel-row.two{grid-template-columns:1fr 1fr}
+    .skel{display:block;border-radius:20px;background:linear-gradient(90deg,#f0e6d1 25%,#faf3e3 50%,#f0e6d1 75%);background-size:300% 100%;animation:shimmer 1.4s linear infinite}
+    .skel-kpi{height:124px}.skel-chart{height:300px}
+    @media(max-width:1100px){.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-grid.wide,.dash-grid{grid-template-columns:minmax(0,1fr)}}
+    @media(max-width:560px){.kpi-grid{gap:10px}.kpi{padding:14px;min-height:0}.kpi .stat-value{font-size:22px}.kpi .stat-icon{display:none}.kpi .stat-label{font-size:12px}.skel-row{grid-template-columns:1fr 1fr}.skel-row.two{grid-template-columns:1fr}.recent-list li{flex-direction:column}.rl-act .status-select{max-width:none;width:100%}.chart-box{height:220px}.dash-toolbar{align-items:stretch}}
+    /* dashboard:end */
 </style>
 </head>
 <body>
@@ -301,6 +346,7 @@
     </main>
   </div>
   <div id="modalRoot"></div><div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/vendor/chartjs-4.5.1/chart.umd.min.js"></script>
   <script>
     const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
     let csrf='', currentUser='', currentPage='overview', cachedProducts=[], cachedCategories=[], cachedOrders=[];
@@ -360,7 +406,7 @@
     function startFromHash(){const [page,action,id]=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);const valid=TITLES[page]?page:'overview';pendingAction=valid==='products'&&action==='new'?{type:'new'}:valid==='products'&&action==='edit'&&Number(id)?{type:'edit',id:Number(id)}:null;if(valid==='messages'&&MSG_FILTERS.some(f=>f[0]===action))messageFilter=action;navigate(valid)}
     // In-page links such as #messages/new or /admin/#products/edit/7 (dashboard) switch pages without a reload.
     window.addEventListener('hashchange',()=>{if($('#appShell').classList.contains('hidden'))return;$('#modalRoot').innerHTML='';startFromHash()});
-    function navigate(page){currentPage=page;if(location.hash!=='#'+page&&!pendingAction)history.replaceState(null,'','/admin/#'+page);$$('.side-nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('#pageTitle').textContent=TITLES[page][0];$('#pageSubtitle').textContent=TITLES[page][1];$('#sidebar').classList.remove('open');$('#sidebarOverlay').classList.remove('open');renderPage()}
+    function navigate(page){currentPage=page;if(!location.hash.startsWith('#'+page)&&!pendingAction)history.replaceState(null,'','/admin/#'+page);$$('.side-nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('#pageTitle').textContent=TITLES[page][0];$('#pageSubtitle').textContent=TITLES[page][1];$('#sidebar').classList.remove('open');$('#sidebarOverlay').classList.remove('open');renderPage()}
     $$('.side-nav button').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.page==='messages')messageFilter='all';navigate(b.dataset.page)}));
     $('#menuButton').addEventListener('click',()=>{$('#sidebar').classList.toggle('open');$('#sidebarOverlay').classList.toggle('open')});$('#sidebarOverlay').addEventListener('click',()=>{$('#sidebar').classList.remove('open');$('#sidebarOverlay').classList.remove('open')});
     async function getCategories(){const data=await api('/api/admin/categories');cachedCategories=data.categories;return cachedCategories}
@@ -433,22 +479,163 @@
       body.classList.remove('is-loading');body.removeAttribute('aria-busy');
       if(announce)$('#statsStatus').textContent=`تم عرض إحصاءات ${period}.`;
     }
+    // ---- dashboard (landing view): KPIs, charts, alerts and quick actions from GET /api/admin/dashboard?range=N
+    const DASH_RANGES=[7,30,90];
+    const DASH_COLORS={new:'#8a5a00',confirmed:'#3f6a94',preparing:'#7154a8',shipped:'#1f7a80',delivered:'#2f7a4b',cancelled:'#a8403c'};
+    let dashRange=30,dashCharts=[],dashTimer=null,dashSeq=0,dashAuto=false,dashData=null;
+    try{dashAuto=localStorage.getItem('adminDashAuto')==='1'}catch{}
+    const dashReduce=()=>window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function dashDestroy(){dashCharts.forEach(c=>{try{c.destroy()}catch{}});dashCharts=[]}
+    function dashStop(){clearInterval(dashTimer);dashTimer=null}
+    function dashPeriodName(n){return n===7?'آخر 7 أيام':n===30?'آخر 30 يومًا':'آخر 90 يومًا'}
+    function ordersText(n){n=Number(n)||0;if(n===0)return 'لا طلبات';if(n===1)return 'طلب واحد';if(n===2)return 'طلبان';if(n<=10)return `${num(n)} طلبات`;return `${num(n)} طلبًا`}
+    // Trend vs the previous period: arrow glyph + words (never colour alone). kind: 'up' | 'down' | 'flat'
+    function dashTrend(cur,prev,unit){
+      cur=Number(cur)||0;prev=Number(prev);
+      if(!Number.isFinite(prev))return null;
+      if(cur===prev)return {kind:'flat',icon:'■',text:'دون تغيير عن الفترة السابقة'};
+      if(prev===0)return {kind:'up',icon:'▲',text:`${unit(cur)} مقابل لا شيء في الفترة السابقة`};
+      const pct=Math.round(Math.abs(cur-prev)/prev*100);
+      return cur>prev?{kind:'up',icon:'▲',text:`ارتفاع ${num(pct)}٪ عن الفترة السابقة`}:{kind:'down',icon:'▼',text:`انخفاض ${num(pct)}٪ عن الفترة السابقة`};
+    }
+    function dashKpi(label,value,foot,icon,trend,key){
+      return `<article class="stat-card kpi" data-kpi="${key}"><div><div class="stat-label">${esc(label)}</div><div class="stat-value">${value}</div>${trend?`<div class="kpi-trend ${trend.kind}"><span aria-hidden="true">${trend.icon}</span> ${esc(trend.text)}</div>`:''}<div class="stat-foot">${esc(foot)}</div></div><span class="stat-icon" aria-hidden="true">${icon}</span></article>`;
+    }
+    function dashSkeleton(){
+      return `<div class="dash-skel" aria-hidden="true"><div class="skel-row">${'<span class="skel skel-kpi"></span>'.repeat(4)}</div><div class="skel-row two"><span class="skel skel-chart"></span><span class="skel skel-chart"></span></div><div class="skel-row two"><span class="skel skel-chart"></span><span class="skel skel-chart"></span></div></div>`;
+    }
+    function dashPanel(id,title,body,extra=''){return `<section class="panel dash-panel" aria-labelledby="${id}T"><div class="panel-head"><h3 id="${id}T">${esc(title)}</h3>${extra}</div><div class="panel-body">${body}</div></section>`}
+    function dashSrTable(caption,heads,rows){
+      return `<table class="sr-only"><caption>${esc(caption)}</caption><thead><tr>${heads.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map((c,i)=>i?`<td>${esc(c)}</td>`:`<th scope="row">${esc(c)}</th>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    function dashBarList(items,valueKey,unitFn,empty,labelFn){
+      if(!items.length)return `<p class="dash-empty">${esc(empty)}</p>`;
+      const max=Math.max(1,...items.map(x=>Number(x[valueKey])||0));
+      return `<ol class="bar-list">${items.map(x=>{const v=Number(x[valueKey])||0;return `<li><div class="bar-top"><span class="bar-name">${labelFn(x)}</span><b>${esc(unitFn(v))}</b></div><span class="bar-track" aria-hidden="true"><span class="bar-fill" style="width:${Math.max(v?4:0,Math.round(v/max*100))}%"></span></span></li>`}).join('')}</ol>`;
+    }
+    function dashSimpleTable(label,head,rows,empty){
+      if(!rows.length)return `<p class="dash-empty">${esc(empty)}</p>`;
+      return `<div class="table-wrap" tabindex="0" role="region" aria-label="${esc(label)}"><table class="data-table compact"><thead><tr><th scope="col">${esc(head)}</th><th scope="col">المشاهدات</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${r[0]}</td><td>${esc(viewsText(r[1]))}</td></tr>`).join('')}</tbody></table></div>`;
+    }
+    function dashSkeletonOrError(msg){return `<div class="panel"><div class="table-empty" role="alert"><b>تعذّر تحميل لوحة المؤشرات</b>${esc(msg)}<div style="margin-top:12px"><button class="btn small-btn" id="dashRetry" type="button">إعادة المحاولة</button></div></div></div>`}
+    function dashRender(d){
+      const k=d.kpis||{},R=d.range;
+      const unitNum=n=>ordersText(n);
+      const trendOrders=dashTrend(k.orders_period,k.orders_prev_period,unitNum);
+      const trendVisits=dashTrend(k.visits_period,k.visits_prev_period,viewsText);
+      const revenue=k.revenue_period_known==null?'<span class="kpi-na">غير متاح</span>':sar(k.revenue_period_known);
+      const revFoot=k.revenue_period_known==null?'لا توجد طلبات بإجمالي معروف في هذه الفترة':'للطلبات ذات الإجمالي المعروف فقط';
+      const avg=k.avg_order_value_known==null?'<span class="kpi-na">غير متاح</span>':sar(k.avg_order_value_known);
+      const kpis=[
+        dashKpi('الطلبات في الفترة',num(k.orders_period),`${dashPeriodName(R)} · الإجمالي ${num(k.orders_total)}`,ICON.orders,trendOrders,'orders'),
+        dashKpi('الإيرادات المعروفة',revenue,revFoot,ICON.money,null,'revenue'),
+        dashKpi('متوسط قيمة الطلب',avg,'من الطلبات ذات الإجمالي المعروف',ICON.money,null,'avg'),
+        dashKpi('زيارات المتجر',num(k.visits_period),'مشاهدات الصفحات دون زياراتك',ICON.eye,trendVisits,'visits'),
+        dashKpi('طلبات جديدة بانتظارك',num(k.orders_new_pending),'كل الفترات',ICON.orders,null,'pending'),
+        dashKpi('رسائل غير مقروءة',num(k.messages_unread),'من نموذج التواصل',ICON.mail,null,'messages'),
+        dashKpi('المنتجات الظاهرة',num(k.products_active),`من أصل ${num(k.products_total)} منتج`,ICON.box,null,'products'),
+        dashKpi('مخزون منخفض',num(k.low_stock_count),'منتجات مخزونها 3 أو أقل',ICON.alert,null,'low')
+      ].join('');
+      const byDay=d.orders_by_day||[],byStatus=d.orders_by_status||{},visits=d.visits_by_day||[];
+      const statusTotal=Object.values(byStatus).reduce((a,b)=>a+(Number(b)||0),0);
+      const ordersTotalP=byDay.reduce((a,x)=>a+x.count,0),visitsTotalP=visits.reduce((a,x)=>a+x.views,0);
+      const peakO=byDay.reduce((a,x)=>x.count>(a?a.count:-1)?x:a,null),peakV=visits.reduce((a,x)=>x.views>(a?a.views:-1)?x:a,null);
+      const ordersSummary=ordersTotalP?`${ordersText(ordersTotalP)} خلال ${dashPeriodName(R)}، أعلى يوم ${dayLong(peakO.day)} بـ${ordersText(peakO.count)}.`:`لا توجد طلبات خلال ${dashPeriodName(R)}.`;
+      const visitsSummary=visitsTotalP?`${viewsText(visitsTotalP)} خلال ${dashPeriodName(R)}، أعلى يوم ${dayLong(peakV.day)} بـ${viewsText(peakV.views)}.`:`لا توجد مشاهدات مسجّلة خلال ${dashPeriodName(R)}.`;
+      const statusSummary=statusTotal?`توزيع ${ordersText(statusTotal)} حسب الحالة: `+Object.keys(STATUS).map(s=>`${STATUS[s]} ${num(byStatus[s]||0)}`).join('، ')+'.':'لا توجد طلبات في هذه الفترة.';
+      const chartBox=(id,summary,hasData,empty,table)=>hasData?`<div class="chart-box"><canvas id="${id}" role="img" aria-label="${esc(summary)}"></canvas></div><p class="chart-sum">${esc(summary)}</p>${table}`:`<p class="dash-empty">${esc(empty)}</p>`;
+      const ordersBlock=chartBox('chOrders',ordersSummary,ordersTotalP>0,'لا توجد طلبات في هذه الفترة بعد. ستظهر هنا حين يرسل العملاء طلباتهم.',dashSrTable('الطلبات اليومية',['اليوم','عدد الطلبات','الإيراد المعروف (ر.س)'],byDay.map(x=>[dayLong(x.day),String(x.count),String(x.revenue_known)])));
+      const legend=Object.keys(STATUS).map(s=>`<li><span class="swatch" style="background:${DASH_COLORS[s]}" aria-hidden="true"></span>${esc(STATUS[s])} <b>${num(byStatus[s]||0)}</b></li>`).join('');
+      const statusBlock=statusTotal?`<div class="donut-wrap"><div class="chart-box donut"><canvas id="chStatus" role="img" aria-label="${esc(statusSummary)}"></canvas></div><ul class="donut-legend">${legend}</ul></div><p class="chart-sum">${esc(statusSummary)}</p>${dashSrTable('الطلبات حسب الحالة',['الحالة','عدد الطلبات'],Object.keys(STATUS).map(s=>[STATUS[s],String(byStatus[s]||0)]))}`:`<p class="dash-empty">لا توجد طلبات في هذه الفترة.</p>`;
+      const visitsBlock=chartBox('chVisits',visitsSummary,visitsTotalP>0,'لا توجد مشاهدات مسجّلة في هذه الفترة بعد.',dashSrTable('المشاهدات اليومية',['اليوم','المشاهدات'],visits.map(x=>[dayLong(x.day),String(x.views)])));
+      const prods=dashBarList(d.top_products||[],'orders',ordersText,'لا توجد منتجات مطلوبة في هذه الفترة.',p=>`${esc(p.name||'منتج')}<small class="muted"> · ${esc(viewsText(p.views))}</small>`);
+      const cats=dashBarList(d.top_categories||[],'orders',ordersText,'لا توجد أقسام مطلوبة في هذه الفترة.',c=>esc(c.name||c.slug));
+      const refRows=(d.referrers||[]).map(r=>[`<b>${esc(referrerLabel(r.host))}</b>`,r.views]);
+      const pageRows=(d.top_pages||[]).map(p=>{let path=p.path;try{path=decodeURIComponent(p.path)}catch{}return [`<b>${esc(pageLabel(p.path))}</b><span class="stats-path">${esc(path)}</span>`,p.views]});
+      const low=(d.low_stock||[]).length?`<ul class="low-list">${d.low_stock.map(i=>`<li><span>${esc(i.name)}</span><span class="low-actions"><span class="badge ${i.stock<=0?'red':'orange'}">${i.stock<=0?'نفد':num(i.stock)+' متبقٍ'}</span><a class="btn secondary small-btn" href="#products/edit/${Number(i.id)}">تعديل المنتج<span class="sr-only"> ${esc(i.name)}</span></a></span></li>`).join('')}</ul>`:'<p class="dash-empty">لا توجد منتجات منخفضة المخزون. كل شيء متوفر.</p>';
+      const orderRows=(d.recent_orders||[]);
+      const orders=orderRows.length?`<ul class="recent-list">${orderRows.map(o=>`<li><div class="rl-main"><b>${esc(o.order_number)}</b> <span class="muted">· ${esc(o.customer_name)}</span><div class="small muted">${esc(fmtDateTime(o.created_at))} · ${o.total>0?sar(o.total):'حسب الطلب'}${o.on_request&&o.total>0?' + بنود حسب الطلب':''}</div></div><div class="rl-act"><label class="sr-only" for="dst${o.id}">حالة الطلب ${esc(o.order_number)}</label><select class="status-select select-control" id="dst${o.id}" data-order-status="${Number(o.id)}" data-key="o${Number(o.id)}">${Object.keys(STATUS).map(s=>`<option value="${s}"${s===o.status?' selected':''}>${esc(STATUS[s])}</option>`).join('')}</select></div></li>`).join('')}</ul>`:'<p class="dash-empty">لا توجد طلبات بعد. ستظهر الطلبات الجديدة هنا بعد تسجيلها من واجهة المتجر.</p>';
+      const msgRows=d.recent_messages||[];
+      const msgs=msgRows.length?`<ul class="recent-list">${msgRows.map(m=>`<li><div class="rl-main"><b>${esc(m.name)}</b>${m.status==='new'?' <span class="badge orange">جديدة</span>':' <span class="badge gray">تمت المعالجة</span>'}<div class="small">${esc(m.preview)}</div><div class="small muted">${esc(fmtDateTime(m.created_at))}</div></div><div class="rl-act">${m.status==='new'?`<button class="btn secondary small-btn" type="button" data-msg-handled="${Number(m.id)}" data-key="m${Number(m.id)}">تحديد كمعالجة<span class="sr-only"> رسالة ${esc(m.name)}</span></button>`:''}</div></li>`).join('')}</ul>`:'<p class="dash-empty">لا توجد رسائل بعد.</p>';
+      return `<section class="stats-grid kpi-grid" aria-label="المؤشرات الرئيسية">${kpis}</section>
+      <div class="dash-grid wide">${dashPanel('dOrders','الطلبات اليومية',ordersBlock)}${dashPanel('dStatus','الطلبات حسب الحالة',statusBlock)}</div>
+      <div class="dash-grid wide">${dashPanel('dVisits','زيارات المتجر اليومية',visitsBlock)}${dashPanel('dLow','تنبيه المخزون',low,'<button type="button" data-go="products">كل المنتجات ←</button>')}</div>
+      <div class="dash-grid">${dashPanel('dProd','أكثر المنتجات طلبًا',prods)}${dashPanel('dCat','أكثر الأقسام طلبًا',cats)}</div>
+      <div class="dash-grid">${dashPanel('dRef','مصادر الزيارات',dashSimpleTable('جدول مصادر الزيارات','الموقع المحيل',refRows,'لا توجد بيانات عن مصادر الزيارات بعد.'))}${dashPanel('dPages','أكثر الصفحات زيارة',dashSimpleTable('جدول أكثر الصفحات زيارة','الصفحة',pageRows,'لا توجد مشاهدات مسجّلة بعد.'))}</div>
+      <div class="dash-grid">${dashPanel('dRecent','أحدث الطلبات',orders,'<button type="button" data-go="orders">كل الطلبات ←</button>')}${dashPanel('dMsgs','أحدث الرسائل',msgs,'<button type="button" data-go="messages">كل الرسائل ←</button>')}</div>`;
+    }
+    function dashCharts_(d,animate){
+      if(typeof Chart==='undefined')return;
+      const R=d.range,reduce=dashReduce();
+      Chart.defaults.font.family='system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif';Chart.defaults.font.size=12;Chart.defaults.color='#4f493e';
+      Chart.defaults.animation=reduce||!animate?false:{duration:600};
+      const axes=(yTitle)=>({x:{reverse:true,grid:{display:false},ticks:{autoSkip:true,maxRotation:0,callback(v){return dayShort(this.getLabelForValue(v))}}},y:{position:'right',beginAtZero:true,grid:{color:'#e8dcc7'},border:{display:false},ticks:{precision:0,callback:v=>num(v)},title:{display:false,text:yTitle}}});
+      const tip={rtl:true,textDirection:'rtl',backgroundColor:'#15130f',titleColor:'#ead6a6',bodyColor:'#fdfaf4',padding:10,cornerRadius:10,displayColors:false,titleAlign:'right',bodyAlign:'right'};
+      const byDay=d.orders_by_day||[],visits=d.visits_by_day||[];
+      const c1=$('#chOrders');
+      if(c1)dashCharts.push(new Chart(c1,{type:'bar',data:{labels:byDay.map(x=>x.day),datasets:[{label:'الطلبات',data:byDay.map(x=>x.count),backgroundColor:'#8f6a2c',borderRadius:5,maxBarThickness:28}]},options:{responsive:true,maintainAspectRatio:false,scales:axes('الطلبات'),plugins:{legend:{display:false},tooltip:{...tip,callbacks:{title:i=>dayLong(i[0].label),label:i=>ordersText(i.raw),afterLabel:i=>{const x=byDay[i.dataIndex];return x&&x.revenue_known?'الإيراد المعروف: '+sar(x.revenue_known):''}}}}}}));
+      const c2=$('#chStatus');
+      if(c2){const keys=Object.keys(STATUS).filter(s=>(d.orders_by_status||{})[s]);
+        dashCharts.push(new Chart(c2,{type:'doughnut',data:{labels:keys.map(s=>STATUS[s]),datasets:[{data:keys.map(s=>d.orders_by_status[s]),backgroundColor:keys.map(s=>DASH_COLORS[s]),borderColor:'#fffdf8',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,cutout:'62%',rotation:0,plugins:{legend:{display:false},tooltip:{...tip,callbacks:{label:i=>`${i.label}: ${ordersText(i.raw)}`}}}}}))}
+      const c3=$('#chVisits');
+      if(c3){const ctx=c3.getContext('2d'),g=ctx.createLinearGradient(0,0,0,240);g.addColorStop(0,'rgba(143,106,44,.45)');g.addColorStop(1,'rgba(143,106,44,.04)');
+        dashCharts.push(new Chart(c3,{type:'line',data:{labels:visits.map(x=>x.day),datasets:[{label:'المشاهدات',data:visits.map(x=>x.views),borderColor:'#8f6a2c',backgroundColor:g,fill:true,tension:.3,pointRadius:R<=7?4:0,pointHoverRadius:5,borderWidth:2.5}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:axes('المشاهدات'),plugins:{legend:{display:false},tooltip:{...tip,callbacks:{title:i=>dayLong(i[0].label),label:i=>viewsText(i.raw)}}}}}))}
+    }
+    async function dashLoad(opts={}){
+      const body=$('#dashBody');if(!body)return;
+      const seq=++dashSeq,first=!dashData;
+      const status=$('#dashStatus');
+      if(first||opts.range){dashDestroy();body.innerHTML=dashSkeleton();dashData=null}
+      body.setAttribute('aria-busy','true');
+      let d;
+      try{d=await api('/api/admin/dashboard?range='+dashRange)}
+      catch(err){if(seq!==dashSeq||currentPage!=='overview')return;body.removeAttribute('aria-busy');if(dashData){toast(err.message);return}body.innerHTML=dashSkeletonOrError(err.message);$('#dashRetry').addEventListener('click',()=>dashLoad({range:true}));return}
+      if(seq!==dashSeq||currentPage!=='overview'||!$('#dashBody'))return;
+      const active=document.activeElement,key=active&&active.dataset?active.dataset.key:null;
+      dashDestroy();const animate=first||!!opts.range;dashData=d;
+      body.innerHTML=dashRender(d);body.removeAttribute('aria-busy');
+      dashCharts_(d,animate);
+      const k=d.kpis||{};
+      $('#pendingBadge').textContent=k.orders_new_pending;$('#pendingBadge').classList.toggle('hidden',!k.orders_new_pending);setMessagesBadge(k.messages_unread);
+      const alertBox=$('#dashAlert');if(alertBox){const n=Number(k.messages_unread)||0;alertBox.innerHTML='';if(n){const a=document.createElement('a');a.className='msg-alert';a.href='#messages/new';a.innerHTML=`<span class="stat-icon">${ICON.mail}</span><span class="msg-alert-copy"><b></b><small>استفسارات من نموذج التواصل في المتجر بانتظار ردّك.</small></span><span class="msg-alert-go" aria-hidden="true">←</span>`;a.querySelector('b').textContent=`لديك ${msgCountText(n)}`;alertBox.append(a)}}
+      const stamp=$('#dashStamp');if(stamp)stamp.textContent='آخر تحديث: '+new Date(d.generated_at).toLocaleTimeString('ar-SA',{timeStyle:'short'});
+      if(status&&opts.announce)status.textContent=`تم عرض مؤشرات ${dashPeriodName(d.range)}.`;
+      $$('#dashBody [data-go]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
+      $$('#dashBody [data-order-status]').forEach(sel=>sel.addEventListener('change',async()=>{
+        sel.disabled=true;try{await api(`/api/admin/orders/${sel.dataset.orderStatus}`,{method:'PATCH',body:{status:sel.value}});toast('تم تحديث حالة الطلب')}catch(err){toast(err.message)}
+        await dashLoad({restore:sel.dataset.key})}));
+      $$('#dashBody [data-msg-handled]').forEach(btn=>btn.addEventListener('click',async()=>{
+        btn.disabled=true;try{await api(`/api/admin/messages/${btn.dataset.msgHandled}`,{method:'PATCH',body:{status:'handled'}});toast('تم تحديد الرسالة كمعالجة')}catch(err){toast(err.message)}
+        await dashLoad({restore:'h'})}));
+      const want=opts.restore||key;
+      if(want){const el=want==='h'?$('#dashRecentFocus')||$('#dRecentT'):$(`#dashBody [data-key="${want}"]`);if(el){if(!el.matches('a,button,input,select,textarea,[tabindex]'))el.setAttribute('tabindex','-1');el.focus()}}
+    }
+    function dashSchedule(){
+      dashStop();
+      if(!dashAuto)return;
+      dashTimer=setInterval(()=>{
+        if(document.hidden||currentPage!=='overview'||!$('#dashBody')){if(currentPage!=='overview'||!$('#dashBody'))dashStop();return}
+        const a=document.activeElement;if(a&&a.tagName==='SELECT'&&a.closest('#dashBody'))return;
+        dashLoad({});
+      },60000);
+    }
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden&&dashAuto&&currentPage==='overview'&&$('#dashBody')&&dashData&&Date.now()-new Date(dashData.generated_at)>60000)dashLoad({})});
     async function renderOverview(){
-      const d=await api('/api/admin/dashboard');const cur=await api('/api/store');
-      $('#pendingBadge').textContent=d.pending_orders;$('#pendingBadge').classList.toggle('hidden',!d.pending_orders);
-      const newMessages=Number(d.new_messages)||0;setMessagesBadge(d.new_messages);
-      const messagesAlert=newMessages?`<a class="msg-alert" href="#messages/new"><span class="stat-icon">${ICON.mail}</span><span class="msg-alert-copy"><b>لديك ${msgCountText(newMessages)}</b><small>استفسارات من نموذج التواصل في المتجر بانتظار ردّك.</small></span><span class="msg-alert-go" aria-hidden="true">←</span></a>`:'';
-      const rows=d.recent_orders.length?d.recent_orders.map(o=>`<tr><td><b>${esc(o.order_number)}</b></td><td>${esc(o.customer_name)}</td><td>${esc(o.city)}</td><td>${sar(o.total)}${o.on_request?'<br><small class="muted">+ بنود حسب الطلب</small>':''}</td><td><span class="badge ${o.status==='new'?'orange':o.status==='cancelled'?'red':'green'}">${esc(STATUS[o.status]||o.status)}</span></td><td>${new Date(o.created_at).toLocaleDateString('ar-SA')}</td></tr>`).join(''):'<tr><td colspan="6"><div class="table-empty"><b>لا توجد طلبات بعد</b>ستظهر الطلبات الجديدة هنا بعد تسجيلها من واجهة المتجر.</div></td></tr>';
-      $('#pageContent').innerHTML=`<div class="page-head"><div><h2>أهلًا ${esc(cur.name||'بك')} 👋</h2><p>إليك ملخص نشاط متجرك حتى الآن.</p></div><div class="page-actions"><button class="btn" data-go="products">${ICON.plus} إضافة منتج</button></div></div>
-      ${messagesAlert}<section class="stats-grid"><article class="stat-card"><div><div class="stat-label">إجمالي المنتجات</div><div class="stat-value">${d.products}</div><div class="stat-foot">${d.active_products} منتج ظاهر في المتجر</div></div><span class="stat-icon">${ICON.box}</span></article>
-      <article class="stat-card"><div><div class="stat-label">طلبات جديدة</div><div class="stat-value">${d.pending_orders}</div><div class="stat-foot">من أصل ${d.total_orders} طلب</div></div><span class="stat-icon">${ICON.orders}</span></article>
-      <article class="stat-card"><div><div class="stat-label">مبيعات الطلبات المسلّمة</div><div class="stat-value" style="font-size:20px">${sar(d.delivered_revenue)}</div><div class="stat-foot">إجمالي الطلبات التي حالتها تم التسليم</div></div><span class="stat-icon">${ICON.money}</span></article>
-      <article class="stat-card"><div><div class="stat-label">مخزون منخفض</div><div class="stat-value">${d.low_stock}</div><div class="stat-foot">منتجات مخزونها 3 أو أقل</div></div><span class="stat-icon">${ICON.alert}</span></article></section>
-      <div class="dashboard-grid" style="margin-bottom:15px"><section class="panel"><div class="panel-head"><h3>الطلبات في آخر 14 يومًا</h3></div><div class="panel-body">${ordersChart(d.daily||[])}</div></section>
-      <section class="panel"><div class="panel-head"><h3>مخزون منخفض</h3></div><div class="panel-body">${(d.low_stock_items||[]).length?`<ul class="low-list">${d.low_stock_items.map(i=>`<li><a href="/admin/#products/edit/${i.id}">${esc(i.name)}</a><span class="badge ${i.stock<=0?'red':'orange'}">${i.stock<=0?'نفد':i.stock+' متبقٍ'}</span></li>`).join('')}</ul>`:'<p class="muted small">لا توجد منتجات منخفضة المخزون.</p>'}</div></section></div>
-      <div class="dashboard-grid"><section class="panel"><div class="panel-head"><h3>أحدث الطلبات</h3><button data-go="orders">عرض كل الطلبات ←</button></div><div class="table-wrap" tabindex="0" role="region" aria-label="جدول البيانات"><table class="data-table"><thead><tr><th>رقم الطلب</th><th>العميل</th><th>المدينة</th><th>الإجمالي</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>${rows}</tbody></table></div></section>
-      <section class="panel"><div class="panel-head"><h3>اختصارات الإدارة</h3></div><div class="panel-body"><div class="notice-card"><b>إدارة متجرك من مكان واحد</b>حدّث المنتجات والأسعار والصور والمخزون. كل تغيير تحفظه يظهر في واجهة المتجر.</div><div class="quick-links"><button class="quick-link" data-go="products"><span class="stat-icon">${ICON.box}</span><span><b>أضف منتجًا جديدًا</b><small>صورة، وصف، سعر ومخزون</small></span></button><button class="quick-link" data-go="orders"><span class="stat-icon">${ICON.orders}</span><span><b>تابع الطلبات</b><small>حدّث حالة الطلب وصدّرها</small></span></button><button class="quick-link" data-go="messages"><span class="stat-icon">${ICON.mail}</span><span><b>رسائل العملاء</b><small>${newMessages?`لديك ${msgCountText(newMessages)}`:'استفسارات نموذج التواصل'}</small></span></button><button class="quick-link" data-go="settings"><span class="stat-icon">${ICON.edit}</span><span><b>بيانات المتجر</b><small>المدينة ووسائل التواصل</small></span></button></div></div></section></div>`;
-      $$('#pageContent [data-go]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
+      dashStop();dashDestroy();dashData=null;
+      const cur=await api('/api/store').catch(()=>({}));
+      const hashRange=Number((location.hash.replace(/^#\/?/,'').split('/')[1])||0);
+      if(DASH_RANGES.includes(hashRange))dashRange=hashRange;
+      $('#pageContent').innerHTML=`<div class="page-head"><div><h2>أهلًا ${esc(cur.name||'بك')}</h2><p>مؤشرات أداء المتجر والطلبات والزيارات. <span id="dashStamp" class="muted"></span></p></div><div class="page-actions"><button class="btn" data-go="products">${ICON.plus} إضافة منتج</button></div></div>
+      <div class="dash-toolbar"><div class="period-switch" role="group" aria-label="الفترة الزمنية">${DASH_RANGES.map(n=>`<button type="button" class="btn secondary small-btn range-btn" data-range="${n}" aria-pressed="${n===dashRange}">${dashPeriodName(n)}</button>`).join('')}</div>
+        <div class="dash-tools"><label class="auto-toggle"><input type="checkbox" id="dashAuto" role="switch"${dashAuto?' checked':''}> تحديث تلقائي كل دقيقة</label><button type="button" class="btn secondary small-btn" id="dashRefresh">تحديث الآن</button></div></div>
+      <p class="sr-only" id="dashStatus" role="status" aria-live="polite"></p><div id="dashAlert"></div><div id="dashBody" class="dash-body"></div>
+      <section class="panel dash-panel" aria-labelledby="dashQuickT"><div class="panel-head"><h3 id="dashQuickT">اختصارات الإدارة</h3></div><div class="panel-body"><div class="quick-links"><button class="quick-link" data-go="products"><span class="stat-icon">${ICON.box}</span><span><b>أضف منتجًا جديدًا</b><small>صورة، وصف، سعر ومخزون</small></span></button><button class="quick-link" data-go="orders"><span class="stat-icon">${ICON.orders}</span><span><b>تابع الطلبات</b><small>حدّث حالة الطلب وصدّرها</small></span></button><button class="quick-link" data-go="messages"><span class="stat-icon">${ICON.mail}</span><span><b>رسائل العملاء</b><small>استفسارات نموذج التواصل</small></span></button><button class="quick-link" data-go="settings"><span class="stat-icon">${ICON.edit}</span><span><b>بيانات المتجر</b><small>المدينة ووسائل التواصل</small></span></button></div></div></section>`;
+      $$('#pageContent .page-head [data-go],#pageContent .quick-link').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
+      $$('.range-btn').forEach(b=>b.addEventListener('click',()=>{const n=Number(b.dataset.range);if(n===dashRange)return;dashRange=n;$$('.range-btn').forEach(x=>x.setAttribute('aria-pressed',String(Number(x.dataset.range)===n)));history.replaceState(null,'','/admin/#overview/'+n);dashLoad({range:true,announce:true})}));
+      $('#dashRefresh').addEventListener('click',()=>dashLoad({announce:true}));
+      $('#dashAuto').addEventListener('change',e=>{dashAuto=e.target.checked;try{localStorage.setItem('adminDashAuto',dashAuto?'1':'0')}catch{}dashSchedule();$('#dashStatus').textContent=dashAuto?'تم تفعيل التحديث التلقائي.':'تم إيقاف التحديث التلقائي.'});
+      dashSchedule();
+      await dashLoad({range:true});
     }
     async function renderProducts(){
       const [data,cats]=await Promise.all([api('/api/admin/products'),getCategories()]);cachedProducts=data.products;

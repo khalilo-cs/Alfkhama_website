@@ -14,6 +14,8 @@
     h1{font-size:22px;margin:0 0 8px}
     p{color:#d8cfbd;font-size:16px;margin:0 0 24px}
     button{border:0;border-radius:999px;background:linear-gradient(135deg,#f0dcae,#d3ad6b 42%,#b28642);color:#15130f;font:inherit;font-weight:700;padding:12px 28px;min-height:48px;cursor:pointer}
+    .contact{margin:22px 0 0;font-size:15px;color:#d8cfbd}
+    .contact a{color:#ead6a6;font-weight:700;text-underline-offset:4px;display:inline-flex;align-items:center;min-height:44px}
     button:focus-visible{outline:3px solid #ead6a6;outline-offset:3px}
   </style>
 </head>
@@ -23,7 +25,8 @@
     <h1>لا يوجد اتصال بالإنترنت</h1>
     <p>يلزم الاتصال لعرض المنتجات والأسعار والمخزون المحدّثة. تحقّق من الشبكة ثم أعد المحاولة.</p>
     <button type="button" id="retry">إعادة المحاولة</button>
+    <p class="contact" role="note">يمكنك الاتصال بالمتجر مباشرة: <a href="tel:+966576486491" dir="ltr">+966 57 648 6491</a><br>شارع المكرونة، مجمع الشرق، حي مشرفة، جدة 23444</p>
   </main>
-  <script>document.getElementById('retry').addEventListener('click',function(){location.reload()});</script>
+  <script>document.getElementById('retry').addEventListener('click',function(){location.reload()});window.addEventListener('online',function(){location.reload()});</script>
 </body>
 </html>
