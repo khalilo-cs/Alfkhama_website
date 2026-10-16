@@ -619,8 +619,8 @@ PAGE_CSS = """
 .page-hero{position:relative;isolation:isolate;overflow:hidden;background:radial-gradient(ellipse 55% 85% at 92% 0%,rgba(201,164,100,.26),transparent 62%),radial-gradient(ellipse 45% 70% at 0% 100%,rgba(201,164,100,.12),transparent 60%),var(--night);color:var(--ivory);padding:26px 0 70px}
 .page-hero:after{content:"";position:absolute;right:6%;left:6%;bottom:0;height:1px;background:linear-gradient(90deg,transparent,rgba(234,214,166,.55),transparent);pointer-events:none}
 .page-hero .container{position:relative;z-index:1}
-.page-hero-media{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2}
-.page-hero.has-media:before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(270deg,rgba(21,19,15,.95) 0%,rgba(21,19,15,.86) 46%,rgba(21,19,15,.5) 100%)}
+.page-hero-media{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;object-fit:cover;z-index:-2}
+.page-hero.has-media:before{content:"";position:absolute;top:0;right:0;bottom:0;left:0;z-index:-1;background:linear-gradient(270deg,rgba(21,19,15,.95) 0%,rgba(21,19,15,.86) 46%,rgba(21,19,15,.5) 100%)}
 .page-hero .eyebrow{color:var(--gold-2);margin-top:22px}
 .page-hero h1{font-family:var(--display);font-weight:700;font-size:clamp(36px,5.2vw,64px);line-height:1.25;letter-spacing:0;margin:14px 0 12px;max-width:860px;color:var(--ivory);overflow-wrap:anywhere}
 .page-hero-intro{margin:0;max-width:660px;font-size:17px;line-height:2;color:rgba(253,250,244,.86)}
