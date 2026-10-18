@@ -1,6 +1,12 @@
+// ملف اختبار شامل من طرف المتصفح (E2E): يشغّل Chromium عبر Playwright ويتصرف كزبون ثم كمدير على الهاتف وسطح المكتب.
+// يشغّل خادماً مؤقتاً خاصاً به (app.py) على منفذ حر مع مجلد بيانات مؤقت وكلمة مرور عشوائية للمدير، فلا يمسّ
+// بيانات المتجر.
+// كل فحص يُسجَّل كـ PASS أو FAIL في النهاية، وأي خطأ غير متوقع في console المتصفح يُعدّ فشلاً أيضاً (رمز خروج 1).
+// الاستخدام: node tests/e2e_ui.cjs [مجلد لقطات الشاشة]؛ وتُحفظ لقطات الشاشة لمراجعة التصميم بالعين.
 // Browser end-to-end check of the storefront and admin UI (Chromium via Playwright, phone-sized viewport).
 //   NODE_PATH=$(npm root -g) node tests/e2e_ui.cjs [screenshot-dir]
 // Starts its own server on a free port with a throw-away DATA_DIR and a random admin password.
+// ---- الاستيراد والثوابت ----
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -10,18 +16,24 @@ const path = require('path');
 const crypto = require('crypto');
 const assert = require('assert');
 
+// ROOT جذر المشروع، وSHOTS مجلد لقطات الشاشة (المعطى في سطر الأوامر أو مجلد مؤقت).
 const ROOT = path.resolve(__dirname, '..');
 const SHOTS = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'fakhama-shots-'));
 fs.mkdirSync(SHOTS, { recursive: true });
 
+// صورة PNG بحجم بكسل واحد، تُستخدم لاختبار رفع الصور من لوحة الإدارة.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
+// يحجز منفذاً حراً بفتح خادم مؤقت على المنفذ 0 ثم إغلاقه وإرجاع رقمه.
 function freePort() {
   return new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// ---- تشغيل الخادم المؤقت والمتصفح ----
 (async () => {
+  // كلمة مرور المدير عشوائية وتُمرَّر بمتغير بيئة فقط (ENV_FILE=off يمنع قراءة .env محلي)، ونحتفظ بمخرجات الخطأ
+  // للتشخيص.
   const port = await freePort();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fakhama-e2e-'));
   const password = 'E' + crypto.randomBytes(14).toString('base64url');
@@ -30,15 +42,21 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   let serverLog = '';
   server.stderr.on('data', d => { serverLog += d; });
+  // ننتظر (حتى 10 ثوانٍ) حتى يرد /api/health دلالة على جاهزية الخادم.
   for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${port}/api/health`); break; } catch { await sleep(100); } }
   const base = `http://127.0.0.1:${port}`;
 
   const browser = await chromium.launch();
   const results = [];
+  // check: يغلّف كل فحص بـ try/catch فيسجّل PASS أو FAIL مع أول 3 أسطر من الرسالة بدل أن يوقف باقي الفحوص.
+  // ملاحظة: الاستدعاء يكون check(اسم، دالة)() أي بقوسين في النهاية لتنفيذه.
   const check = (name, fn) => async () => { try { await fn(); results.push(['PASS', name]); } catch (e) { results.push(['FAIL', name + ' — ' + e.message.split('\n').slice(0, 3).join(' | ')]); } };
+  // قائمة أخطاء المتصفح (console/pageerror/HTTP 4xx-5xx) التي تُفحص عند النهاية.
   const errors = [];
   let newPassword = '';
 
+  // ---- دوال مساعدة للصفحات المولَّدة من الخادم ----
+  // watch: يراقب صفحة ويسجّل أخطاءها، ويستثني رمز 4xx للمسارات التي يكون الـ 404 فيها هو المقصود من الفحص.
   // --- helpers for the server-rendered pages
   // Browser errors on a page are failures, except a 4xx on a path whose 404 is the point of the check.
   const expectedUrl = (url, paths) => { try { const u = new URL(url); return u.origin === base && paths.includes(u.pathname); } catch { return false; } };
@@ -47,29 +65,38 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     pg.on('pageerror', e => errors.push(`${label} pageerror: ${e.message}`));
     pg.on('response', r => { if (r.status() >= 400 && !expectedUrl(r.url(), expected)) errors.push(`${label} http ${r.status()}: ${r.url()}`); });
   };
+  // follow: ينفّذ نقرة تقود إلى صفحة جديدة وينتظر التنقل في الوقت نفسه (لتفادي سباق بين النقر والتحميل).
   // Click a link (or press a key in a form) and return the HTTP response of the page it leads to.
   const follow = async (pg, action) => { const [resp] = await Promise.all([pg.waitForNavigation(), action()]); return resp; };
+  // الواجهة تحمّل الكتالوج الحي وتعيد رسم الشبكات؛ نمنع الفحص قبل أن تصبح حالته ready.
   const catalogReady = pg => pg.waitForFunction(() => typeof catalogState !== 'undefined' && catalogState === 'ready');
+  // currentNav: يعيد روابط القائمة التي تحمل aria-current (الصفحة الحالية) لفحص إتاحة التنقل.
   // "page" on the list page itself, "true" for its section (a product or category page inside it)
   const currentNav = pg => pg.$$eval('#mainNav a[aria-current]:not([aria-current="false"])', as => as.map(a => a.getAttribute('href')));
+  // oneH1: كل صفحة يجب أن تحوي عنواناً رئيسياً h1 واحداً فقط (قاعدة وصول وSEO).
   const oneH1 = async (pg, text) => {
     const h1s = await pg.$$eval('h1', els => els.map(e => e.textContent.trim()));
     assert.strictEqual(h1s.length, 1, 'exactly one h1: ' + JSON.stringify(h1s));
     if (text !== undefined) assert.strictEqual(h1s[0], text);
   };
+  // toastSays: ننتظر ظهور رسالة منبثقة ثم نفرغها حتى لا يرضي نصّها القديم انتظاراً لاحقاً.
   // Wait for a toast, then clear it so a later wait cannot be satisfied by this one's text.
   const toastSays = async (pg, text) => {
     await pg.waitForFunction(t => document.querySelector('#toast').textContent.includes(t), text);
     await pg.evaluate(() => { document.querySelector('#toast').textContent = ''; });
   };
+  // settled: ننتظر انتهاء الحركات المحدودة قبل لقطة الشاشة (الحركة الدائمة كاللمعان لا تنتهي فتُستثنى).
   // Screenshots of a settled page: wait for the finite entrance animations (the looping shimmer never ends).
   const settled = pg => pg.evaluate(() => Promise.all(document.getAnimations().filter(a => Number.isFinite(a.effect?.getComputedTiming().endTime)).map(a => a.finished.catch(() => {}))));
   const apiProducts = async () => (await (await fetch(base + '/api/products')).json()).products;
   // the storefront search haystack (index.html renderProducts / pages.search_matches)
+  // يحسب عدد النتائج المتوقعة بنفس نص البحث الذي تبنيه الواجهة (الاسم والقسم والوصف ورمز المنتج) لمقارنته بما يظهر.
   const searchCount = (products, term) => products.filter(p => `${p.name} ${p.category_name} ${p.description} ${p.sku || ''}`.toLowerCase().includes(term.toLowerCase())).length;
   const pathAndQ = url => { const u = new URL(url); return [u.pathname, u.searchParams.get('q')]; };
 
+  // ---- الفحوص كلها داخل try/finally ليُغلق المتصفح ويُوقف الخادم مهما حدث ----
   try {
+    // القسم الأول: زبون على هاتف (390x844) يتصفح المتجر ويطلب.
     // ------------------------------------------------------------ customer storefront (phone)
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ar-SA', isMobile: true, hasTouch: true });
     const page = await phone.newPage();
@@ -80,12 +107,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
     await page.goto(base + '/');
     await page.waitForSelector('.product-card');
+    // الصفحة الرئيسية تعرض صور المالك الحقيقية فقط (لا منتجات تجريبية مختلقة).
     await check('storefront lists the 18 owner photos (no invented sample products)', async () => assert.strictEqual(await page.locator('.product-card').count(), 18))();
     await check('only categories with products are shown (cards + filter chips use real photos)', async () => {
       assert.strictEqual(await page.locator('#categoryGrid .category-card').count(), 1);
       assert.strictEqual(await page.locator('#filterList .filter-chip').count(), 2);
       assert.ok((await page.getAttribute('#categoryGrid .category-card img', 'src')).startsWith('/assets/wavy-'));
     })();
+    // المنتج بسعر 0 يظهر "السعر حسب الطلب" وليس "0 ريال".
     await check('owner photos show "price on request", not 0 SAR', async () => {
       const first = await page.locator('.product-card').first().textContent();
       assert.ok(first.includes('ويفي') && first.includes('السعر حسب الطلب') && !first.includes('٠'), first);
@@ -95,6 +124,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       const results = await page.$$eval('img.product-image', imgs => Promise.all(imgs.map(i => { i.loading = 'eager'; return i.decode().then(() => i.naturalWidth > 0, () => false); })));
       assert.strictEqual(results.filter(ok => !ok).length, 0);
     })();
+    // PWA: ملف manifest مربوط والـ Service Worker مفعّل بنطاق الموقع كله.
     await check('manifest + SW registered and active', async () => {
       const href = await page.getAttribute('link[rel=manifest]', 'href');
       assert.strictEqual(href, '/manifest.webmanifest');
@@ -103,6 +133,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     })();
     await page.screenshot({ path: path.join(SHOTS, '01-store-mobile.png') });
 
+    // البحث برمز المنتج يصفّي البطاقات؛ على الهاتف صندوق البحث مطويّ فنفتحه أولاً.
     await check('search filters products', async () => {
       await page.click('#searchToggle'); // the search box is collapsed on phones
       await page.fill('#searchInput', 'FAL-WAV-005');
@@ -112,6 +143,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await page.fill('#searchInput', '');
     })();
 
+    // رحلة الزبون الكاملة: معاينة سريعة ← السلة ← نموذج الطلب ← رقم الطلب في الرسالة المنبثقة وتفريغ السلة
+    // المحفوظة في المتصفح.
     await check('add to cart and place an order through the UI', async () => {
       await page.locator('.quick-add').first().click({ force: true });
       await page.waitForSelector('#productModal.open');
@@ -131,6 +164,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('fakhama-cart-v1') || '[]').length), 0, 'cart cleared');
     })();
 
+    // القسم الثاني: لوحة الإدارة على الهاتف. نسجّل ما يحدث لزائر غير مسجّل لنتأكد أن فحص الجلسة لا يترك أخطاء
+    // 401 في الـ console.
     // ------------------------------------------------------------ admin (phone)
     const admin = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ar-SA', isMobile: true, hasTouch: true });
     const ap = await admin.newPage();
@@ -141,6 +176,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await ap.goto(base + '/admin/');
     await ap.waitForSelector('#loginForm');
     await ap.waitForTimeout(800);
+    // الزائر غير المسجّل: واجهة /api/admin/session تردّ 200 (authenticated:false) بدل 401، بينما تبقى بقية
+    // واجهات المدير محمية بـ 401.
     await check('logged-out /admin/ logs no 401 and no console error (session probe answers 200)', async () => {
       assert.deepStrictEqual(loginScreen.statuses, [], 'no 4xx responses: ' + loginScreen.statuses.join(', '));
       assert.deepStrictEqual(loginScreen.consoleErrors, [], 'console errors: ' + loginScreen.consoleErrors.join(' | '));
@@ -150,11 +187,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.deepStrictEqual(prot, [401, 401, 401, 401], 'protected endpoints still 401 for anonymous callers');
     })();
     await ap.screenshot({ path: path.join(SHOTS, '05-admin-login-mobile.png') });
+    // كلمة مرور خاطئة تُظهر رسالة خطأ ولا تدخل.
     await check('admin login rejects a wrong password', async () => {
       await ap.fill('#loginUser', 'admin'); await ap.fill('#loginPass', 'wrong-password-123');
       await ap.click('#loginForm button[type=submit]');
       await ap.waitForFunction(() => document.querySelector('#loginError').textContent.length > 0);
     })();
+    // الدخول الصحيح يعرض اللوحة ويظهر فيها الطلب الذي أنشأه الزبون (رقمه يبدأ بـ MH-).
     await check('admin login works and dashboard shows the new order', async () => {
       await ap.fill('#loginPass', password);
       await ap.click('#loginForm button[type=submit]');
@@ -162,6 +201,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.ok((await ap.textContent('#pageContent')).includes('MH-'));
       await ap.screenshot({ path: path.join(SHOTS, '06-admin-dashboard-mobile.png') });
     })();
+    // الصور المصغرة في جدول المنتجات تُحمَّل (كانت المسارات النسبية تعطي 404 تحت /admin/).
     await check('admin product thumbnails load (relative paths used to 404 under /admin/)', async () => {
       await ap.evaluate(() => navigate('products'));
       await ap.waitForSelector('#productsBody .thumb');
@@ -171,6 +211,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.ok((await ap.textContent('#productsBody')).includes('حسب الطلب'), 'admin shows price on request');
       await ap.screenshot({ path: path.join(SHOTS, '07-admin-products-mobile.png') });
     })();
+    // على عرض 360 بكسل تتحول جداول الإدارة إلى بطاقات: بلا تمرير أفقي، مع عناوين الحقول، وأزرار لا تقل عن 44
+    // بكسل ولا تخرج عن الشاشة.
     await check('admin tables become stacked cards at 360px: no page scroll, labels, 44px actions, full names', async () => {
       const narrow = await browser.newContext({ viewport: { width: 360, height: 740 }, locale: 'ar-SA' });
       const np = await narrow.newPage();
@@ -205,10 +247,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
         assert.ok(await np.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'overview: no horizontal page scroll at 360');
       } finally { await narrow.close(); }
     })();
+    // ملفا صورة مؤقتان لاختبار رفع أكثر من صورة.
     const png = path.join(dataDir, 'upload-test.png');
     fs.writeFileSync(png, PNG);
     const png2 = path.join(dataDir, 'upload-test-2.png');
     fs.writeFileSync(png2, PNG);
+    // إضافة منتج بصورتين وجعل الثانية رئيسية؛ العميل يعيد ترميز الصور إلى JPEG، وللمنتج صفحة مشاركة من الخادم
+    // فيها وسوم og وبيانات Product.
     await check('admin adds a product with TWO uploaded images, reorders them; the storefront shows the gallery', async () => {
       await ap.click('#addProduct');
       await ap.waitForSelector('#productForm');
@@ -233,6 +278,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       const html = await (await fetch(base + '/product/' + encodeURIComponent(made.slug))).text();
       assert.ok(html.includes('og:title') && html.includes('ستارة اختبار الرفع') && html.includes('"Product"'));
     })();
+    // أمان وخصوصية: حتى لو كان المدير مسجلاً في المتصفح لا تظهر أدواته في المتجر العام؛ ونافذة المنتج تحدّث
+    // العنوان وتوفر المعرض والمشاركة عبر واتساب.
     await check('storefront shows no admin tools even to a logged-in admin; product modal has gallery and share', async () => {
       const sp = await admin.newPage();
       await sp.goto(base + '/');
@@ -261,6 +308,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await sp.close();
     })();
 
+    // القسم الثالث: الصفحات التي يولّدها الخادم لزائر جديد على سطح المكتب والهاتف. مسارا الـ 404 المقصودان
+    // يُستثنيان من أخطاء HTTP.
     // ------------------------------------------------------------ server-rendered pages (a fresh visitor on desktop and phone)
     const NOT_FOUND_PATHS = ['/no-such-page', '/product/no-such-product'];
     const visitor = await browser.newContext({ viewport: { width: 1366, height: 800 }, locale: 'ar-SA' });
@@ -273,6 +322,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const GALLERY_NAME = 'ستارة معرض صفحة المنتج';
     let galleryProduct = null;
 
+    // التنقل من القائمة يصل لكل صفحة: HTTP 200 وh1 واحد وaria-current؛ وعلى الهاتف القائمة درج خلف زر #menuToggle.
     await check('header navigation reaches every page: HTTP 200, exactly one h1, aria-current on its own menu link (desktop + phone menu)', async () => {
       await vp.goto(base + '/');
       await vp.waitForSelector('.product-card');
@@ -297,6 +347,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual(await mp.locator('#mainNav.open').count(), 0, 'the menu starts closed on the new page');
     })();
 
+    // البحث يعمل حتى بدون JavaScript (يصفّي الخادم النتائج ويضع noindex لصفحة بحث)، ومع JavaScript يتزامن
+    // العنوان مع ما يُكتب.
     await check('/products?q= filters the server-rendered list (no JavaScript) and the live list; typing keeps the URL in sync', async () => {
       const all = await apiProducts();
       const nojs = await browser.newContext({ javaScriptEnabled: false, locale: 'ar-SA' });
@@ -325,6 +377,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await settled(vp); await vp.screenshot({ path: path.join(SHOTS, '20-products-desktop.png') });
     })();
 
+    // صفحة المنتج: تبديل الصور بالنقر ولوحة المفاتيح، وعدّاد السلة، ونسخ الرابط (صلاحية الحافظة ممنوحة للسياق).
     await check('product page: a two-photo product added in the admin — gallery thumbs switch (click + keyboard), add to cart counts, copy link', async () => {
       await ap.evaluate(() => navigate('products'));
       await ap.waitForSelector('#addProduct');
@@ -386,6 +439,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await settled(vp); await vp.screenshot({ path: path.join(SHOTS, '21-product-page-desktop.png') });
     })();
 
+    // المنتجات ذات الصلة تفتح المعاينة السريعة، وإغلاقها يعيد عنوان المنتج ويعيد التركيز لمكانه (إتاحة).
     await check('related products on a product page open the quick view; closing it (button or Escape) returns to the product URL and focus', async () => {
       const resp = await vp.goto(base + '/product/wavy-03');
       assert.strictEqual(resp.status(), 200);
@@ -414,7 +468,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual(await vp.locator('#productTitle').count(), 1, 'still on the product page');
     })();
 
+    // نص فيه رموز HTML عمداً (<> و&) للتأكد أنه يظهر كنص ولا يُفسَّر كوسوم.
     const CAT_DESC = 'وصف تجريبي لقسم الستائر <من اختبار الواجهة> & يظهر أعلى صفحة القسم';
+    // صفحة القسم تعرض منتجاته فقط ووصف القسم المحفوظ في الإدارة (كنص مهرَّب).
     await check('category page lists only its own products and shows the description saved in the admin categories page (as text)', async () => {
       await ap.evaluate(() => navigate('categories'));
       await ap.waitForSelector('[data-edit-category="curtains"]');
@@ -454,7 +510,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.ok(blinds.some(([n]) => n === GALLERY_NAME));
     })();
 
+    // فقرتا "من نحن" للاختبار؛ الثانية فيها رموز وسوم للتأكد من التهريب.
     const ABOUT = ['فقرة تجريبية أولى من اختبار الواجهة.', 'فقرة تجريبية ثانية <ليست وسمًا> من الاختبار.'];
+    // صفحة "من نحن" تعرض النص المحفوظ من الإعدادات، وبيانات التواصل تبقى كما هي دون واجهة واتساب.
     await check('/about shows the text saved in the admin Settings page ("صفحة من نحن"); contact details stay as stored, no WhatsApp UI', async () => {
       await ap.evaluate(() => navigate('settings'));
       await ap.waitForSelector('#aboutForm');
@@ -475,6 +533,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await settled(vp); await vp.screenshot({ path: path.join(SHOTS, '23-about-desktop.png'), fullPage: true });
     })();
 
+    // حقل الفخ (honeypot) ضد البوتات: مخفي عن العين وقارئات الشاشة ويتخطاه Tab، فلا يملؤه إلا برنامج آلي.
     await check('contact form honeypot is invisible, aria-hidden and skipped by Tab', async () => {
       const resp = await mp.goto(base + '/contact');
       assert.strictEqual(resp.status(), 200);
@@ -499,7 +558,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual(await mp.locator('main a[href*="wa.me"]').count(), 0, 'no WhatsApp link while settings.whatsapp is empty');
     })();
 
+    // رسالة اتصال للاختبار.
     const MSG = { name: 'زائر اختبار التواصل', phone: '0551234567', email: 'visitor@example.com', message: 'رسالة تجريبية من اختبار الواجهة لصفحة التواصل.' };
+    // الرسالة المرسلة من صفحة التواصل تصل لصفحة الرسائل في الإدارة مع شارة "جديدة"، ثم تُعلَّم معالجة ثم تُحذف.
     await check('/contact message reaches the admin Messages page with the new-message badge; mark handled, then delete', async () => {
       await mp.fill('#contactName', MSG.name);
       await mp.fill('#contactPhone', MSG.phone);
@@ -537,6 +598,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual((await ap.evaluate(() => api('/api/admin/messages?status=all'))).messages.length, 0, 'deleted on the server');
     })();
 
+    // صفحة 404 بهوية المتجر: رمز 404 وnoindex وh1 واحد وصندوق بحث؛ وأي رابط صفحة بشرطة أخيرة يُعاد توجيهه (301)
+    // بدونها.
     await check('unknown pages get the branded 404 (HTTP 404, noindex, one h1, search box); page URLs drop a trailing slash (301)', async () => {
       const resp = await mp.goto(base + '/no-such-page');
       assert.strictEqual(resp.status(), 404);
@@ -562,6 +625,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       }
     })();
 
+    // البحث من أي صفحة غير المتجر ينقل إلى /products?q= (زر البحث على الهاتف وصندوقه على سطح المكتب).
     await check('header search on a non-shop page goes to /products?q= (phone search toggle and desktop)', async () => {
       const all = await apiProducts();
       await mp.goto(base + '/faq');
@@ -584,21 +648,29 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await follow(vp, () => vp.press('#searchInput', 'Enter'));
       assert.deepStrictEqual(pathAndQ(vp.url()), ['/products', null]);
     })();
+    // القسم الرابع: ميزات الواجهة الجديدة (الهياكل المؤقتة، الاقتراحات، التصفية، المشاهَد مؤخراً، المفضلة،
+    // السلة، الطلب، المعارض، التثبيت، وضع عدم الاتصال).
     // ------------------------------------------------------------ storefront v2: skeletons, suggestions, filters, recents, wishlist, cart, order flow, galleries, install, offline
+    // toNum: يحوّل نصاً فيه أرقام عربية-هندية إلى رقم عادي لمقارنة الأسعار والكميات.
     const toNum = t => Number(String(t).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d]/g, ''));
     const SOLD_OUT = 'ستارة نفدت للاختبار';
     let soldOut = null;
+    // quickView: التمرير سلس في الموقع، فننقل البطاقة للمشهد فوراً قبل النقر لأن موضع الزر يتغير أثناء التمرير.
     // the page scrolls smoothly: bring the card into view at once so the click lands where the button really is
     const quickView = async loc => { await loc.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' })); await loc.click({ force: true }); };
     const desktopCtx = async (extra = {}) => { const c = await browser.newContext({ viewport: { width: 1366, height: 800 }, locale: 'ar-SA', ...extra }); await c.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }).catch(() => {}); return c; };
+    // layoutShift: يقيس انزياح التخطيط التراكمي (CLS) بواسطة PerformanceObserver لاستبعاد القفزات بعد التفاعل.
     const layoutShift = pg => pg.evaluate(() => new Promise(res => { let v = 0; new PerformanceObserver(l => { for (const e of l.getEntries()) if (!e.hadRecentInput) v += e.value; }).observe({ type: 'layout-shift', buffered: true }); setTimeout(() => res(v), 2200); }));
 
+    // تجهيز: منتج مخزونه صفر لاختبار فلتر "المتوفر فقط"، ويُحذف في فحص التنظيف لاحقاً.
     await check('setup: a sold-out product (stock 0) exists for the availability filter', async () => {
       const made = await ap.evaluate(name => api('/api/admin/products', { method: 'POST', body: { name, category: 'curtains', price: 120, stock: 0, active: true, description: 'منتج نفد للاختبار', image: '/assets/wavy-04.jpg' } }), SOLD_OUT);
       soldOut = made.product;
       assert.ok(soldOut && soldOut.id && Number(soldOut.stock) === 0, JSON.stringify(made));
     })();
 
+    // أثناء التحميل تظهر بطاقات هيكلية (aria-busy ومخفية عن قارئ الشاشة) ثم المنتجات، مع إبقاء المساحة محجوزة
+    // لتقليل قفزة التخطيط.
     await check('loading shows skeleton cards (aria-busy, hidden from screen readers), then real products; images fade in; reserved space (little layout shift)', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'skeleton');
       await pg.route('**/api/products', async route => { await sleep(900); await route.continue(); });
@@ -625,6 +697,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await m.close();
     })();
 
+    // صورة الهيرو عنصر img حقيقي بأولوية تحميل عالية، وعند تفضيل المستخدم تقليل الحركة تتوقف حركتها.
     await check('hero: real <img> with fetchpriority=high that loads, category shortcut chips; reduced motion stops the hero motion', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); await pg.goto(base + '/'); await catalogReady(pg);
       assert.strictEqual(await pg.getAttribute('.hero-bg', 'fetchpriority'), 'high');
@@ -640,6 +713,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await calm.close();
     })();
 
+    // الاقتراحات: قائمة combobox بتأخير قصير بعد الكتابة، مطابقة تراعي العربية، تمييز الكلمة، والتنقل بالأسهم
+    // وEnter وEscape.
     await check('search: debounced suggestions (combobox), Arabic-aware matching, highlight, arrow keys + Enter, Escape', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'suggest'); await pg.goto(base + '/'); await catalogReady(pg);
       assert.strictEqual(await pg.getAttribute('#searchInput', 'role'), 'combobox');
@@ -685,6 +760,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // الفرز و"المتوفر فقط" والقسم تُخزَّن في عنوان الصفحة (قابلة للمشاركة والاستعادة بعد إعادة التحميل) مع زر مسح.
     await check('filters: sort + "available only" + category live in the URL (shareable, restored on reload), clear button, newest first', async () => {
       const all = await apiProducts();
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'filters');
@@ -720,6 +796,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // شريط "شوهد مؤخراً": الأحدث أولاً، يستبعد المنتج الحالي، وزر المسح يفرّغه.
     await check('recently viewed: quick views and product pages are remembered (newest first), the current product is left out, "clear" empties it', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'recent'); await pg.goto(base + '/'); await catalogReady(pg);
       assert.strictEqual(await pg.locator('#recentSection').count(), 0, 'nothing before anything was viewed');
@@ -750,6 +827,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // المفضلة: زر باسم ثابت وaria-pressed، تُحفظ في المتصفح، وتتزامن بين التبويبات والمعاينة السريعة، ويعرضها
+    // /products?favorites=1.
     await check('wishlist: accessible toggle (stable name + aria-pressed), persists, syncs across tabs and the quick view, /products?favorites=1', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'wishlist'); await pg.goto(base + '/'); await catalogReady(pg);
       const heart = pg.locator('#productGrid .favorite-btn').first();
@@ -780,6 +859,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await pg2.close(); await ctx.close();
     })();
 
+    // درج السلة: أزرار الكمية وإجمالي كل سطر، وحدّ الكمية عند المخزون، والتراجع بعد الحذف، ومجموع صادق يوضح أن
+    // بعض الأسعار عند الطلب.
     await check('cart drawer: quantity steppers, line totals, limit at stock (aria-disabled + hint), undo after removing, honest "price on request" subtotal', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'cart'); await pg.goto(base + '/'); await catalogReady(pg);
       const stock = Number(galleryProduct.stock);
@@ -836,6 +917,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // مسار الطلب: ملخص، تحقق مضمّن مع aria-invalid ونقل التركيز، قبول الأرقام العربية، عرض خطأ الخادم داخل
+    // النموذج، ثم لوحة التأكيد برقم الطلب.
     await check('order flow: summary, inline validation (aria-invalid, messages, focus), Arabic digits accepted, server error shown inline, confirmation panel with order number', async () => {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ar-SA', isMobile: true, hasTouch: true, serviceWorkers: 'block' });
       await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base }).catch(() => {});
@@ -901,6 +984,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // معرض صفحة المنتج: أسهم وعدّاد وسحب باللمس وتكبير بالنقر وزر تكبير، وEscape يخرج من التكبير.
     await check('product page gallery: arrows + counter, swipe, tap-to-zoom, zoom button, Escape leaves the zoom, arrow keys', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'gallery');
       await pg.goto(base + '/product/' + encodeURIComponent(galleryProduct.slug)); await catalogReady(pg);
@@ -935,6 +1019,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // معرض المعاينة السريعة: أول Escape يخرج من التكبير فقط والثاني يغلق النافذة؛ والصورة المبدئية الضبابية هي
+    // المصغرة.
     await check('quick view gallery: arrows, thumbnails, zoom; first Escape leaves the zoom and only the second closes the dialog; blur-up placeholder is the thumbnail', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' }); const pg = await ctx.newPage(); watch(pg, 'quickview'); await pg.goto(base + '/'); await catalogReady(pg);
       await pg.fill('#searchInput', GALLERY_NAME);
@@ -961,6 +1047,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // تثبيت التطبيق (PWA): بطاقة قابلة للإغلاق بعد مهلة، ورابط في التذييل، وتأجيل أسبوعين، ولا تظهر داخل تطبيق
+    // أندرويد.
     await check('install the app: dismissible card after the delay, footer link, native prompt, snooze for two weeks; none inside the Android app', async () => {
       const ctx = await desktopCtx({ serviceWorkers: 'block' });
       await ctx.addInitScript(() => { window.__installDelayMs = 150; });
@@ -994,6 +1082,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await app.close();
     })();
 
+    // إشعارات انقطاع الاتصال وعودته، والتأكد أن الـ Service Worker يخزّن ملفات الموقع العامة فقط (assets
+    // والأيقونات وصفحة offline) ولا يخزّن API ولا الإدارة ولا uploads.
     await check('connection notices (offline / back online); the service worker caches only public site files (incl. the new script + styles) and never API/admin/uploads', async () => {
       const ctx = await desktopCtx(); const pg = await ctx.newPage(); watch(pg, 'network'); await pg.goto(base + '/'); await catalogReady(pg);
       await pg.evaluate(async () => { await navigator.serviceWorker.ready; });
@@ -1010,6 +1100,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // لا تمرير أفقي في أضيق شاشة مدعومة (360px) في الرئيسية والمنتجات وصفحة المنتج.
     await check('no horizontal scroll at 360px on the home, products and product pages with the new controls', async () => {
       const ctx = await browser.newContext({ viewport: { width: 360, height: 740 }, locale: 'ar-SA', isMobile: true, hasTouch: true, serviceWorkers: 'block' }); const pg = await ctx.newPage();
       for (const url of ['/', '/products?stock=1&sort=low', '/product/' + encodeURIComponent(galleryProduct.slug), '/category/blinds']) {
@@ -1020,13 +1111,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ctx.close();
     })();
 
+    // تنظيف: حذف المنتج المساعد الذي أُنشئ لاختبار فلتر المتوفر.
     await check('cleanup: the sold-out helper product is removed again', async () => {
       await ap.evaluate(id => api('/api/admin/products/' + id, { method: 'DELETE' }), soldOut.id);
       assert.ok(!(await apiProducts()).some(p => p.id === soldOut.id));
     })();
 
+    // ---- بقية فحوص لوحة الإدارة (على سياق المدير ap) ----
     await visitor.close();
     await mobile.close();
+    // الأقسام: إضافة بصورة، إعادة ترتيب، تعديل، حذف.
     await check('admin categories: add with image, reorder, edit, delete', async () => {
       await ap.evaluate(() => navigate('categories'));
       await ap.waitForSelector('#categoryAddForm');
@@ -1049,12 +1143,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ap.evaluate(() => navigate('products'));
       await ap.waitForSelector('#productsBody .thumb');
     })();
+    // رابط مباشر يفتح نموذج إضافة منتج بعد تسجيل الدخول.
     await check('deep link /admin/#products/new opens the add-product form after login', async () => {
       const dl = await admin.newPage();
       await dl.goto(base + '/admin/#products/new');
       await dl.waitForSelector('#productForm', { timeout: 15000 });
       await dl.close();
     })();
+    // لوحة المعلومات: المؤشرات، رسوم لها بدائل نصية (إتاحة)، المدى المختار يُحفظ في الرابط، ولا فيض أفقي عند 360px.
     await check('admin dashboard: KPIs, charts with text alternatives, range switch persisted in the URL, no overflow at 360px', async () => {
       await ap.evaluate(() => navigate('overview'));
       await ap.waitForSelector('#dashBody [data-kpi="orders"]');
@@ -1073,6 +1169,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.ok(wide <= 0, 'no horizontal scroll at 360px, overflow ' + wide);
       await ap.evaluate(() => navigate('products'));
     })();
+    // إخفاء منتج وتعديله وحذفه من الإدارة.
     await check('admin hides, edits and deletes a product', async () => {
       const row = ap.locator('#productsBody tr', { hasText: 'ستارة اختبار الرفع' });
       await row.locator('[data-toggle-product]').click();
@@ -1085,6 +1182,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ap.locator('#productsBody tr', { hasText: 'ستارة اختبار الرفع' }).locator('[data-delete-product]').click();
       await ap.waitForFunction(() => !document.querySelector('#productsBody').textContent.includes('ستارة اختبار الرفع'));
     })();
+    // صفحة الطلبات وتغيير الحالة وحفظ الإعدادات.
     await check('admin orders page, status change and settings save', async () => {
       await ap.evaluate(() => navigate('orders'));
       await ap.waitForSelector('.order-status');
@@ -1101,6 +1199,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual(store.phone, '+966 57 648 6491');
       assert.strictEqual(store.map_url, 'https://maps.app.goo.gl/kn2kxuPujQT9raLG7?g_st=awb');
     })();
+    // تغيير كلمة المرور من الواجهة: رسالة نجاح بلا أخطاء JavaScript.
     await check('admin changes the password from the UI (success toast, no JS error)', async () => {
       await ap.evaluate(() => navigate('settings'));
       await ap.waitForSelector('#passwordForm');
@@ -1112,6 +1211,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ap.waitForFunction(() => document.querySelector('#toast').textContent.includes('تم تحديث كلمة المرور بنجاح'));
       assert.strictEqual(await ap.inputValue('#oldPassword'), '', 'form reset after success');
     })();
+    // المصادقة الثنائية: تفعيلها برمز من تطبيق مصادقة، ثم يطلب الدخول الرمز. دالة totp أدناه تنفيذ مستقل لمعيار
+    // RFC 6238 (HMAC-SHA1 وخطوة 30 ثانية و6 أرقام) كي لا نعتمد على كود الخادم في التحقق.
     await check('two-factor: set up with an authenticator code, login then requires the code', async () => {
       const totp = (secret) => { // independent RFC 6238 implementation
         const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = '';
@@ -1138,6 +1239,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await ap.click('#loginForm button[type=submit]');
       await ap.waitForSelector('#appShell:not(.hidden)'); // lands on the page named in the URL hash (#settings)
     })();
+    // تسجيل الخروج يعيد إلى شاشة الدخول.
     await check('admin logout returns to the login screen', async () => {
       await ap.click('#menuButton'); // the sidebar (with the logout button) is a drawer on phones
       await ap.click('#logoutBtn');
@@ -1145,13 +1247,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       assert.strictEqual((await fetch(base + '/api/admin/dashboard')).status, 401);
     })();
 
+    // لقطة شاشة لسطح المكتب للمراجعة البصرية (بدون تحقق).
     // ------------------------------------------------------------ desktop admin screenshot
     const desk = await browser.newContext({ viewport: { width: 1366, height: 800 }, locale: 'ar-SA' });
     const dp = await desk.newPage();
     await dp.goto(base + '/');
     await dp.waitForSelector('.product-card');
     await dp.screenshot({ path: path.join(SHOTS, '10-store-desktop.png') });
+    // ---- حالات الأعطال: خطأ الكتالوج ثم سقوط الخادم (يجب أن يكونا آخر الفحوص لأن الثاني يوقف الخادم) ----
     // ------------------------------------------------------------ failure modes
+    // نحجب طلب /api/products فتظهر حالة خطأ بزر إعادة المحاولة بدون منتجات مختلقة، ثم نرفع الحجب فيتعافى.
     await check('catalogue error state shows a retry button, blocks checkout, then recovers (no invented products)', async () => {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', locale: 'ar-SA' });
       const pg = await ctx.newPage();
@@ -1165,6 +1270,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await pg.waitForSelector('.product-card');
       await ctx.close();
     })();
+    // نتأكد أولاً أن ذاكرة الـ Service Worker لا تحوي إلا ملفات عامة، ثم نوقف الخادم فعلياً ونتحقق أن التنقل
+    // يعرض صفحة "لا يوجد اتصال" الثابتة.
     await check('server down: navigation falls back to the static offline page', async () => {
       const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'ar-SA' });
       const pg = await ctx.newPage();
@@ -1183,12 +1290,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       await pg.screenshot({ path: path.join(SHOTS, '04-offline-mobile.png') });
       await ctx.close();
     })();
+  // تنظيف نهائي: إغلاق المتصفح وإيقاف الخادم وحذف مجلد البيانات المؤقت.
   } finally {
     await browser.close();
     server.kill();
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 
+  // ---- التقرير النهائي ----
+  // نتجاهل أخطاء الشبكة المتوقعة (net::ERR_ عند إيقاف الخادم عمداً، و401 لمحاولة الدخول الخاطئة، وطلبات API
+  // الفاشلة عمداً)؛ وأي خطأ آخر يفشل التشغيل.
   for (const [status, name] of results) console.log(status, name);
   const unexpected = errors.filter(e => !/net::ERR_|admin http 401: .*\/api\/admin\/login/i.test(e) && !/requestfailed: .*\/api\//.test(e));
   console.log('\nbrowser errors:', unexpected.length ? '\n  ' + unexpected.join('\n  ') : 'none');

@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف AndroidManifest.xml: تعريف التطبيق للنظام. التطبيق شاشة واحدة (MainActivity) تعرض الموقع -->
+<!-- داخل WebView. -->
+<!-- هنا الأذونات والنشاط الرئيسي وإعدادات النسخ الاحتياطي والشبكة. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- The only permission: talk to the store server. No camera, location, storage or contacts. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- إعدادات التطبيق: allowBackup وfullBackupContent وdataExtractionRules تمنع نسخ بيانات -->
+    <!-- التطبيق (كوكيز الجلسة والتخزين)، -->
+    <!-- وnetworkSecurityConfig يفرض https في الإصدار، وsupportsRtl لتدعم الواجهة العربية. -->
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -14,15 +20,21 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Alfakhamah">
 
+        <!-- الشاشة الوحيدة. configChanges يمنع إعادة إنشاء النشاط عند تدوير الشاشة وتغيّر اللغة -->
+        <!-- وغيرها حتى لا تضيع الصفحة المفتوحة. -->
+        <!-- exported=true لازم لأنه نقطة الدخول (LAUNCHER). adjustResize يرفع المحتوى عند ظهور -->
+        <!-- لوحة المفاتيح. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density|layoutDirection|locale"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
+            <!-- نقطة دخول التطبيق من قائمة التطبيقات. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- اختصار الضغط المطوّل على الأيقونة (لوحة الإدارة) معرّف في res/xml/shortcuts.xml. -->
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />

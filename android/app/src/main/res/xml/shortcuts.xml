@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف shortcuts.xml: اختصار المشغّل الوحيد. يرسل extra باسم start_path بقيمة /admin/ إلى -->
+<!-- MainActivity. -->
+<!-- الأخير لا يقبل إلا هذه القيمة بالضبط (انظر onCreate). -->
 <!-- Long-press the app icon: a shortcut straight to the admin panel (it still asks for the admin login). -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut

@@ -1,14 +1,24 @@
+# ------------------------------------------------------------------------------------------------------------------
+# legal.py: يبني صفحتَي «سياسة الخصوصية» /privacy و«الشروط والأحكام» /terms كصفحات HTML كاملة من إعدادات المتجر
+# (الاسم والهاتف والعنوان ومعرّف Google Analytics). يستدعيه app.py عبر render(path, settings)، وتُدرج عناوين
+# الصفحتين في sitemap.xml من PAGES. النصوص قوالب عامة؛ على المالك مراجعتها قانونيًا قبل الاعتماد عليها.
+# البنود تتغير بحسب الإعدادات: تُضاف فقرة Google Analytics فقط إذا ضُبط معرّف صالح، ويتبدّل وصف ملفات الارتباط.
+# ------------------------------------------------------------------------------------------------------------------
 """Privacy policy and terms pages, filled from the store settings. General templates: the owner should have them
 reviewed against the shop's real practices before relying on them."""
+# ---- الاستيرادات ----
 from __future__ import annotations
 
+# esc لتهريب النص قبل وضعه في HTML، و ga4_id يتحقق من المعرّف، و verification_meta وسم تحقق Search Console.
 from seo import esc, ga4_id, verification_meta
 
+# ---- الصفحات المتاحة: المسار -> العنوان العربي (render يعيد None لأي مسار غيرها) ----
 PAGES = {
     "/privacy": "سياسة الخصوصية",
     "/terms": "الشروط والأحكام",
 }
 
+# ---- التنسيق: يوضع داخل <style> مضمّنة (يضيف الخادم nonce لسياسة CSP) ----
 _CSS = """
 :root{--paper:#f8f4ec;--ink:#1b1915;--muted:#5d574c;--line:#e6dccb;--olive:#76561f}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;line-height:1.9;font-size:17px}
@@ -23,7 +33,9 @@ footer{border-top:1px solid var(--line);padding:20px 0;color:var(--muted);font-s
 """
 
 
+# كتلة بيانات التواصل (هاتف يُنقر للاتصال، عنوان، رابط صفحة التواصل). القيم من الإعدادات وتُهرَّب بـ esc.
 def _contact(s: dict) -> str:
+    # في رابط tel: نُبقي الأرقام وعلامة + فقط؛ أما النص المعروض فيبقى كما كتبه المالك.
     bits = []
     if s.get("phone"):
         bits.append(f'الهاتف: <a href="tel:{esc("".join(c for c in s["phone"] if c.isdigit() or c == "+"))}" dir="ltr">{esc(s["phone"])}</a>')
@@ -33,14 +45,17 @@ def _contact(s: dict) -> str:
     return "<br>".join(bits)
 
 
+# جدول تحويل الأرقام اللاتينية إلى الهندية (٠-٩) لترقيم البنود بالعربية.
 _DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 
 
+# يحوّل قائمة (عنوان، محتوى) إلى أقسام h2 مرقّمة تلقائيًا؛ الترقيم متسلسل فيبقى صحيحًا حتى لو حُذف بند اختياري.
 def _numbered(sections: list[tuple[str, str]]) -> str:
     """<h2>١. title</h2> + body for each section, numbered in order (the GA section is optional)."""
     return "\n".join(f"<h2>{str(i).translate(_DIGITS)}. {title}</h2>\n{body}" for i, (title, body) in enumerate(sections, 1))
 
 
+# بند Google Analytics: يُعرض فقط عند ضبط معرّف GA4، ويصف الموافقة المسبقة وما يُجمع وكيفية سحب الموافقة.
 def _google_analytics(store: str) -> str:
     """Only when the owner set a GA4 measurement ID: who processes what, and how to withdraw consent."""
     return f"""<p>إذا ضغطت «قبول» في شريط ملفات تعريف الارتباط، يحمّل الموقع خدمة Google Analytics 4 لنعرف كيف يُستخدم المتجر (مثل الصفحات التي تُزار ومصدر الزيارة) فنحسّنه. إن ضغطت «رفض» أو لم تختر شيئًا فلا تُحمَّل الخدمة ولا يُرسل إليها شيء.</p>
@@ -53,11 +68,14 @@ def _google_analytics(store: str) -> str:
 </ul>"""
 
 
+# نص سياسة الخصوصية: بنود ثابتة، وفقرة ملفات الارتباط وبند Google Analytics وجملة المشاركة تتغير حسب وجود معرّف GA4.
 def _privacy(s: dict, store: str) -> str:
+    # هل فعّل المالك Google Analytics بمعرّف صالح؟ ga4_id تعيد '' لأي قيمة غير صالحة.
     ga = bool(ga4_id(s))
     cookies = ("لا نستخدم ملفات تعريف ارتباط للإعلانات. ملفات Google Analytics لا تُحفظ إلا بعد موافقتك (انظر البند التالي)، "
                "ويُحفظ اختيارك في شريط الموافقة على جهازك. تُستخدم ملفات الجلسة الضرورية لمدير المتجر فقط."
                if ga else "لا نستخدم ملفات تعريف ارتباط للتتبع أو للإعلانات. تُستخدم ملفات الجلسة الضرورية لمدير المتجر فقط.")
+    # البنود الأساسية دائمًا (من نحن، البيانات التي نجمعها).
     sections = [
         ("من نحن", f"""<p>{esc(store)} متجر لبيع الأقمشة والستائر وتفصيلها. هذه الصفحة توضّح كيف نتعامل مع بياناتك عند استخدام الموقع أو التطبيق.</p>
 <p>{_contact(s)}</p>"""),
@@ -70,8 +88,10 @@ def _privacy(s: dict, store: str) -> str:
 <li>{cookies}</li>
 </ul>"""),
     ]
+    # بند GA يُدرج في موضعه الثالث فقط عند التفعيل.
     if ga:
         sections.append(("Google Analytics (بموافقتك فقط)", _google_analytics(store)))
+    # بقية البنود الثابتة.
     sections += [
         ("لماذا نستخدم بياناتك", """<p>لمعالجة طلبك والتواصل معك لتأكيد المقاس والخامة والسعر والتوصيل، ولخدمة ما بعد التنفيذ.</p>
 <p>بيانات رسائل صفحة التواصل تُستخدم فقط للرد على استفسارك ومتابعته، ولا تُستخدم للتسويق.</p>"""),
@@ -86,6 +106,7 @@ def _privacy(s: dict, store: str) -> str:
     return "\n" + _numbered(sections) + "\n"
 
 
+# نص الشروط والأحكام: ثابت ما عدا اسم المتجر وبيانات التواصل؛ الطلب «طلب للمراجعة» وليس عقدًا نهائيًا.
 def _terms(s: dict, store: str) -> str:
     return f"""
 <h2>١. طبيعة الطلب</h2>
@@ -106,13 +127,16 @@ def _terms(s: dict, store: str) -> str:
 """
 
 
+# يبني المستند الكامل للصفحة، أو None إذا كان المسار ليس من PAGES (فيعامله الخادم كصفحة غير موجودة).
 def render(path: str, settings: dict) -> str | None:
     """Full HTML document (inline <style> only; the server adds the CSP nonce) or None for an unknown path."""
     if path not in PAGES:
         return None
+    # اسم المتجر من الإعدادات مع قيمة احتياطية؛ كل قيمة تُهرَّب بـ esc قبل دخولها إلى HTML.
     store = settings.get("store_name") or "المتجر"
     title = f"{PAGES[path]} | {store}"
     body = (_privacy if path == "/privacy" else _terms)(settings, store)
+    # الهيكل: وسوم SEO أساسية ثم تنسيق مضمّن ثم رابط تخطٍّ للمحتوى (إتاحة) ثم الترويسة والمحتوى والتذييل.
     return f"""<!doctype html>
 <html lang="ar" dir="rtl">
 <head>

@@ -12,6 +12,9 @@
 //       Full-page PNG screenshots of the storefront pages and the admin screens of a throw-away server.
 //       Each page is scrolled to the bottom first: its sections fade in as they enter the screen.
 //       The admin password is read from the environment only (never from a file or the command line).
+// الغرض: ملف مساعد يشغّله make_handover.py (وليس جزءًا من الموقع). يستخدم Chromium عبر Playwright لمهمتين:
+// تحويل صفحات HTML إلى PDF بمقاس A4، وأخذ لقطات شاشة كاملة للمتجر ولوحة الإدارة من خادم مؤقت.
+
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -19,6 +22,7 @@ const { chromium } = require('playwright');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// تذييل كل صفحة PDF (اسم المتجر + عنوان الوثيقة + رقم الصفحة)؛ يُهرَّب العنوان لأنه يدخل في HTML القالب.
 function footer(title) {
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   return `<div dir="rtl" style="width:100%;margin:0 14mm;font-family:'DejaVu Sans','Segoe UI',Tahoma,sans-serif;font-size:7.5px;color:#5d574c;display:flex;justify-content:space-between;align-items:center;border-top:0.6px solid #c9a464;padding-top:4px;-webkit-print-color-adjust:exact">`
@@ -26,6 +30,7 @@ function footer(title) {
     + `<span>صفحة <span class="pageNumber"></span> من <span class="totalPages"></span></span></div>`;
 }
 
+// وضع pdf: يفتح كل ملف HTML محلي ويطبعه PDF. settle ينتظر انتهاء صفحات تحسب قيمًا عند التحميل (مثل نسب التباين).
 async function renderPdfs(jobs) {
   const browser = await chromium.launch();
   try {
@@ -50,6 +55,7 @@ async function renderPdfs(jobs) {
 }
 
 // Scroll through the page so every scroll-revealed section (.rv) gets its .in class, then let the motion settle.
+// بعض الأقسام تظهر بحركة عند دخولها الشاشة، فنمرّر الصفحة بخطوات حتى تأخذ صنف in قبل اللقطة.
 async function revealAll(page) {
   await page.evaluate(async () => {
     const step = Math.max(200, Math.floor(innerHeight * 0.6));
@@ -69,6 +75,7 @@ async function revealAll(page) {
 }
 
 // A full-page capture must not catch lazy photos half-way: load and decode every <img> first.
+// لقطة الصفحة الكاملة يجب ألا تلتقط صورًا كسولة التحميل ناقصة، فنحوّلها لتحميل فوري وننتظر فك ترميزها.
 async function loadImages(page) {
   await page.evaluate(async () => {
     const images = [...document.images];
@@ -82,12 +89,14 @@ async function loadImages(page) {
 }
 
 // Park the pointer where nothing reacts to hover (the last click would otherwise leave a tooltip or hover state).
+// نبعد المؤشر عن أي عنصر يتفاعل مع المرور فلا يظهر تلميح أو حالة hover في اللقطة.
 async function parkPointer(page, width) {
   await page.mouse.move(Math.round(width * 0.4), 3);
   await page.waitForTimeout(400);
 }
 
 // Admin pages keep the sidebar position:fixed; make the viewport as tall as the page so it spans the whole capture.
+// لوحة الإدارة شريطها الجانبي position:fixed، فنجعل النافذة بطول الصفحة كي يمتد الشريط على كامل اللقطة.
 async function adminShot(page, width, file) {
   const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
   const base = width < 600 ? 844 : 900;
@@ -99,12 +108,15 @@ async function adminShot(page, width, file) {
   await page.setViewportSize({ width, height: base });
 }
 
+// إعدادات المتصفح: عرض أقل من 600 يُحاكي هاتفًا (لمس وisMobile)، وإلا حاسوب؛ اللغة ar-SA.
 function contextOptions(width) {
   return width < 600
     ? { viewport: { width, height: 844 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true, locale: 'ar-SA' }
     : { viewport: { width, height: 900 }, deviceScaleFactor: 1, locale: 'ar-SA' };
 }
 
+// وضع screens: يلتقط صفحات المتجر كزائر ثم يدخل لوحة الإدارة عبر نموذج الدخول ويلتقط شاشاتها لكل عرض.
+// كلمة المرور تُقرأ من متغير البيئة فقط (لا من ملف ولا من سطر الأوامر). أي خطأ جافاسكربت في الصفحة يجعل الأمر يفشل في النهاية.
 async function renderScreens(config) {
   const password = process.env.HANDOVER_ADMIN_PASSWORD || '';
   if (!password) throw new Error('HANDOVER_ADMIN_PASSWORD is not set');
@@ -172,6 +184,7 @@ async function renderScreens(config) {
 }
 
 (async () => {
+  // نقطة الدخول: الوسيط الأول الوضع (pdf أو screens) والثاني ملف JSON للمهام؛ أي خطأ يُطبع وينتهي برمز 1.
   const [mode, file] = process.argv.slice(2);
   if (!['pdf', 'screens'].includes(mode) || !file) {
     console.error('usage: node tools/render_pdf.cjs pdf JOBS.json | screens CONFIG.json');

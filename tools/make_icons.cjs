@@ -1,6 +1,9 @@
 // Regenerates every PNG icon from the brand glyph (the curtain mark used in the site header).
 //   NODE_PATH=$(npm root -g) node tools/make_icons.cjs
 // Needs the `playwright` package with a Chromium build; nothing here is used at runtime.
+// الغرض: أداة مطوّر لإعادة توليد أيقونات PNG (للموقع وPWA وأيقونة Google Play) من شعار الستارة نفسه،
+// بتصيير SVG داخل Chromium ثم التقاط لقطة. تُحفظ في icons/ وandroid/store-assets/ ولا تُستخدم وقت التشغيل.
+
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
@@ -11,6 +14,7 @@ const STORE = path.join(ROOT, 'android', 'store-assets');
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(STORE, { recursive: true });
 
+// نسقان: ألوان العملاء (خلفية داكنة) وألوان الإدارة (خلفية ذهبية مع شارة شبكة)؛ prefix بادئة اسم ملف الإدارة.
 const THEMES = {
   customer: { bg: '#15130f', fg: '#ead6a6', accent: '#c9a464', prefix: '' },
   admin: { bg: '#d3ad6b', fg: '#15130f', accent: '#15130f', prefix: 'admin-' },
@@ -19,6 +23,8 @@ const THEMES = {
 // Same path data as the <svg> logo in index.html / admin.html (24x24 grid).
 const GLYPH = '<path d="M4 18V6l8 6 8-6v12" /><path d="M8 18v-5m8 5v-5" />';
 
+// يبني SVG لأيقونة واحدة: size الضلع بالبكسل، rounded زوايا مدوّرة، scale نسبة الشعار من المربع، admin يضيف شارة الإدارة.
+// الشعار يوسَّط بحساب offset، وفي أيقونة الإدارة يُرفع قليلًا (0.02) ليتوازن مع الشارة في الزاوية.
 function svg({ bg, fg, accent }, { size, rounded, scale, admin }) {
   const radius = rounded ? size * 0.22 : 0;
   const glyph = size * scale;
@@ -38,6 +44,7 @@ function svg({ bg, fg, accent }, { size, rounded, scale, admin }) {
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
+  // يضبط حجم النافذة بحجم الأيقونة ويلتقط صورة؛ transparent=true يُبقي الزوايا المدوّرة شفافة (omitBackground).
   async function render(markup, size, file, transparent) {
     await page.setViewportSize({ width: size, height: size });
     await page.setContent(`<html><body style="margin:0;background:transparent">${markup}</body></html>`);
@@ -45,6 +52,7 @@ function svg({ bg, fg, accent }, { size, rounded, scale, admin }) {
     fs.writeFileSync(file, buf);
     console.log('wrote', path.relative(ROOT, file));
   }
+  // توليد كل الأحجام لكل نسق.
   for (const [name, theme] of Object.entries(THEMES)) {
     const admin = name === 'admin';
     const p = theme.prefix;

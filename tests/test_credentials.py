@@ -1,3 +1,5 @@
+# ملف اختبار: مزامنة بيانات دخول المدير من متغيرات البيئة (ADMIN_USERNAME / ADMIN_PASSWORD) وأمر set-admin.
+# كلمات المرور هنا تُولَّد عشوائياً لكل اختبار ولا تُكتب في الملفات؛ والمبدأ أن كلمة المرور تأتي من البيئة فقط.
 """Admin credential sync from the environment and the set-admin CLI. Every test uses its own temporary data folder."""
 from __future__ import annotations
 
@@ -15,10 +17,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_app import ROOT, ServerCase  # noqa: E402
 
 
+# ---- أدوات مساعدة ----
+# ينشئ كلمة مرور عشوائية قوية لكل اختبار (البادئة K تضمن وجود حرف كبير).
 def new_password() -> str:
     return "K" + secrets.token_urlsafe(16)
 
 
+# ---- مزامنة بيانات المدير عند تشغيل الخادم ----
+# كل اختبار يعمل بمجلد بيانات مؤقت خاص به، لذلك نتجاوز setUpClass/tearDownClass الذي يشغّل خادماً مشتركاً.
 class CredentialSyncTest(ServerCase):
     @classmethod
     def setUpClass(cls):
@@ -32,13 +38,16 @@ class CredentialSyncTest(ServerCase):
         self.data = tempfile.mkdtemp(prefix="fakhama-cred-")
         self.addCleanup(shutil.rmtree, self.data, True)
 
+    # يشغّل الخادم على مجلد البيانات المؤقت بالبيئة المعطاة، ويضمن إيقافه عند نهاية الاختبار.
     def run_server(self, **env):
         type(self).start_server(data_dir=self.data, env=env)
         self.addCleanup(type(self).stop_server, False)
 
+    # يحاول تسجيل الدخول ويعيد رمز الحالة فقط (200 نجاح، 401 فشل).
     def login_status(self, username, password):
         return self.json("POST", "/api/admin/login", {"username": username, "password": password})[0]
 
+    # يقرأ أسماء الإجراءات من جدول audit_log مباشرة في قاعدة SQLite لفحص ما سُجّل في سجل التدقيق.
     def audit_actions(self):
         conn = sqlite3.connect(Path(self.data) / "store.db")
         try:
@@ -46,6 +55,8 @@ class CredentialSyncTest(ServerCase):
         finally:
             conn.close()
 
+    # السيناريو الكامل: إنشاء أول مرة، ثم استبدال البيانات عند تغيّر البيئة، ثم عدم الكتابة فوق كلمة غيّرها المدير،
+    # ثم التأكد أن أي سر لا يتسرب إلى سجل التدقيق أو بصمة الإعدادات.
     def test_sync_flow(self):
         first, second, third = new_password(), new_password(), new_password()
         # 1. first run creates the admin from the environment (no sync audit entry)
@@ -68,6 +79,7 @@ class CredentialSyncTest(ServerCase):
         self.assertEqual(self.login_status("admin", third), 200)
         self.assertEqual(self.login_status("admin", second), 401)
         self.assertEqual(self.audit_actions().count("admin_credentials_synced"), 1)
+        # البصمة admin_cred_fp مخزّنة كـ salt(32 hex) + $ + hash(64 hex) ولا تحتوي كلمة المرور نفسها.
         # 4. nothing secret ended up in the audit trail or the settings fingerprint
         conn = sqlite3.connect(Path(self.data) / "store.db")
         dump = " ".join(str(v) for row in conn.execute("SELECT detail FROM audit_log") for v in row)
@@ -78,6 +90,7 @@ class CredentialSyncTest(ServerCase):
             self.assertNotIn(secret, fingerprint)
         self.assertRegex(fingerprint, r"^[0-9a-f]{32}\$[0-9a-f]{64}$")
 
+    # كلمة مرور ضعيفة (قصيرة) في البيئة تُتجاهل ويبقى الدخول بكلمة المرور السابقة.
     def test_weak_password_is_not_applied(self):
         good = new_password()
         self.run_server(ADMIN_PASSWORD=good)
@@ -86,6 +99,7 @@ class CredentialSyncTest(ServerCase):
         self.assertEqual(self.login_status("admin", good), 200)
         self.assertEqual(self.login_status("admin", "short1"), 401)
 
+    # مزامنة كلمة المرور لا يجوز أن تمسح سر المصادقة الثنائية (TOTP) المحفوظ للمدير.
     def test_totp_is_kept(self):
         first, second = new_password(), new_password()
         self.run_server(ADMIN_PASSWORD=first)
@@ -99,13 +113,17 @@ class CredentialSyncTest(ServerCase):
         conn.close()
 
 
+# ---- أمر set-admin من سطر الأوامر ----
 class SetAdminCliTest(unittest.TestCase):
+    # يشغّل `python app.py set-admin` في عملية منفصلة؛ نحذف أي بيانات مدير موروثة من البيئة قبل ذلك،
+    # ونعطّل ملف .env (ENV_FILE=off) ونغلق stdin كي لا ينتظر الأمر إدخالاً من لوحة المفاتيح.
     def cli(self, data_dir, **env):
         full = {k: v for k, v in os.environ.items() if k not in ("ADMIN_PASSWORD", "ADMIN_USERNAME")}
         full.update({"DATA_DIR": data_dir, "ENV_FILE": "off", **env})
         return subprocess.run([sys.executable, "-I", str(ROOT / "app.py"), "set-admin"], cwd=data_dir, env=full,
                               capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
 
+    # يتأكد أن كلمة المرور لا تُطبع في المخرجات، وأنها مخزّنة كـ PBKDF2-SHA256 بـ 310000 تكرار (salt$digest).
     def test_set_admin_from_env(self):
         data = tempfile.mkdtemp(prefix="fakhama-cli-")
         self.addCleanup(shutil.rmtree, data, True)
@@ -128,6 +146,7 @@ class SetAdminCliTest(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT username FROM admins").fetchone()[0], "boss")
         conn.close()
 
+    # رمز الخروج 2 يعني رفض الأمر: كلمة مرور ضعيفة، أو غياب كلمة المرور تماماً مع عدم وجود طرفية للسؤال.
     def test_set_admin_rejects_weak_and_missing(self):
         data = tempfile.mkdtemp(prefix="fakhama-cli-")
         self.addCleanup(shutil.rmtree, data, True)

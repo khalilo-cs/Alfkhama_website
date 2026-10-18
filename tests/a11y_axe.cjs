@@ -1,17 +1,29 @@
+// ملف فحص إمكانية الوصول: يفتح الموقع ولوحة الإدارة في متصفح Chromium عبر Playwright ويشغّل مكتبة axe-core
+// على الشاشات والحالات الرئيسية بمقاسي الهاتف وسطح المكتب، ويفشل (رمز خروج 1) عند أي مخالفة.
+// المتطلبات: حزمتا playwright و axe-core. الملف يشغّل خادماً مؤقتاً خاصاً به فلا يمسّ بيانات المتجر الحقيقية.
 // Automated accessibility audit (axe-core, WCAG 2.2 A/AA rules) of the main screens, on phone and desktop sizes.
 //   npm i axe-core   (anywhere);   NODE_PATH=$(npm root -g):/path/to/node_modules node tests/a11y_axe.cjs
 // Starts its own throw-away server; exits non-zero when any violation is found.
+// ---- الاستيراد والأدوات ----
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const fs = require('fs'); const os = require('os'); const path = require('path'); const net = require('net');
+// مكتبة axe تُقرأ كنص لتُحقن داخل كل صفحة؛ freePort يحجز منفذاً حراً ليعمل الخادم المؤقت دون تعارض.
 const axeSource = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 const freePort = () => new Promise(r => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+// ---- تشغيل الخادم المؤقت ----
 (async () => {
+  // مجلد بيانات مؤقت وكلمة مرور عشوائية للمدير تمرَّر عبر متغير بيئة فقط (لا تُكتب في أي ملف)؛
+  // ENV_FILE=off يمنع قراءة ملف .env محلي. ثم ننتظر حتى يستجيب /api/health (حتى 10 ثوانٍ تقريباً) قبل بدء الفحص.
   const port = await freePort(); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'axe-')); const password = 'Ax' + Math.random().toString(36).slice(2) + 'Zz9!long';
   const srv = spawn('python3', ['-I', path.resolve(__dirname, '..', 'app.py')], { cwd: dir, env: { ...process.env, PORT: String(port), DATA_DIR: dir, ADMIN_PASSWORD: password, ENV_FILE: 'off' }, stdio: 'ignore' });
   for (let i = 0; i < 100; i++) { try { await fetch(`http://127.0.0.1:${port}/api/health`); break; } catch { await new Promise(r => setTimeout(r, 100)); } }
   const base = `http://127.0.0.1:${port}`; const browser = await chromium.launch(); let failures = 0;
+  // ---- دوال الفحص المساعدة ----
   const fail = message => { failures++; console.log('FAIL ' + message); };
+  // audit: ينتظر انتهاء حركات الدخول المحدودة (الحركة الدائمة كاللمعان لا تنتهي فتُستثنى) حتى لا يقيس axe
+  // ألواناً شفافة جزئياً،
+  // ثم يحقن axe ويشغّل قواعد WCAG 2.0/2.1/2.2 مستوى A وAA مع قواعد best-practice، ويطبع كل مخالفة وأول عنصر متأثر.
   const audit = async (page, name) => {
     // Measure the settled page: wait for entrance animations (finite ones; the looping shimmer never ends).
     await page.evaluate(() => Promise.all(document.getAnimations().filter(a => Number.isFinite(a.effect?.getComputedTiming().endTime)).map(a => a.finished.catch(() => {}))));
@@ -21,6 +33,8 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
     console.log(`${v.length ? 'FAIL' : 'PASS'} ${name} — ${v.length} violation(s), ${res.passes.length} rules passed`);
     for (const x of v) { failures++; console.log(`   [${x.impact}] ${x.id}: ${x.help} (${x.nodes.length} node(s)) e.g. ${x.nodes[0].target.join(' ')} — ${(x.nodes[0].failureSummary || '').split('\n').slice(0, 2).join(' ')}`); }
   };
+  // revealAll: أقسام الصفحة تظهر بالتدريج عند التمرير (الصنف rv ثم in)؛ نمرّ على الصفحة كلها ليراها axe،
+  // وإن بقي قسم مخفياً نعدّه فشلاً.
   // Sections fade in as they scroll into view; scroll through so axe sees every one of them, then wait for the motion to settle.
   const revealAll = async (page, name) => {
     await page.evaluate(async () => { for (let y = 0; y < document.documentElement.scrollHeight; y += 300) { scrollTo({ top: y, behavior: 'instant' }); await new Promise(r => setTimeout(r, 60)); } scrollTo({ top: 0, behavior: 'instant' }); });
@@ -28,11 +42,14 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
     const hidden = await page.evaluate(() => document.querySelectorAll('.rv:not(.in)').length);
     if (hidden) fail(`${name} — ${hidden} section(s) never revealed`);
   };
+  // catalogReady: لا نفحص الصفحة قبل أن تصبح حالة الكتالوج ready.
   // The storefront script loads the live catalogue on every page and re-renders the grids with it: audit after that.
   const catalogReady = page => page.waitForFunction(() => typeof catalogState !== 'undefined' && catalogState === 'ready');
+  // adminLogin: تسجيل دخول المدير من نموذج لوحة الإدارة وانتظار ظهور بطاقات الإحصاء.
   const adminLogin = async page => {
     await page.fill('#loginUser', 'admin'); await page.fill('#loginPass', password); await page.click('#loginForm button[type=submit]'); await page.waitForSelector('.stats-grid');
   };
+  // ---- تجهيز البيانات التجريبية: رسالتان (جديدة ومعالجة)، ومنتج بصورتين، ووصف للقسم، ونص صفحة "من نحن" ----
   try {
     // Content the new pages show, created the way the owner would: a product with two photos (gallery thumbnails),
     // a category description, the About text, and customer messages in both states (new and handled) for the inbox.
@@ -56,6 +73,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
     if (!gallerySlug) fail('setup: the two-photo product was not created');
     await setup.close();
 
+    // ---- الصفحات العامة المفحوصة؛ صفحة 404 تُعاد برمز 404 عمداً ----
     // [audit name, URL, expected HTTP status]
     const PAGES = [
       ['products page', '/products', 200],
@@ -68,8 +86,10 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
       ['FAQ page (answers open)', '/faq', 200],
       ['404 page', '/no-such-page', 404],
     ];
+    // ---- حلقة الفحص لكل مقاس شاشة: واجهة المتجر ثم الصفحات ثم لوحة الإدارة ----
     for (const [label, vp] of [['phone', { width: 390, height: 844 }], ['desktop', { width: 1366, height: 800 }]]) {
       const ctx = await browser.newContext({ viewport: vp, locale: 'ar-SA' }); const page = await ctx.newPage();
+      // الصفحة الرئيسية: فحص الواجهة بعد ظهور بطاقات المنتجات، ثم نافذة المعاينة السريعة للمنتج.
       await page.goto(base + '/'); await page.waitForSelector('.product-card'); await page.waitForTimeout(500);
       await revealAll(page, `storefront (${label})`);
       await audit(page, `storefront (${label})`);
@@ -77,6 +97,8 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
       await audit(page, `product modal (${label})`);
       await page.keyboard.press('Escape');
       {
+        // هذه الكتلة تفحص الحالات التفاعلية: الاقتراحات، المعرض بصورتين والتكبير، السلة والتراجع، نموذج الطلب،
+        // بطاقة التثبيت.
         // States added with the storefront v2 UI: suggestions, a two-photo quick view (arrows, zoom), the cart (with the undo bar), the order form
         // (empty, with errors, confirmation), the install card, the recently-viewed strip and a filtered list.
         const products = (await (await fetch(base + '/api/products')).json()).products, two = products.find(p => p.slug === gallerySlug);
@@ -103,6 +125,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
         await page.click('#orderForm button[type=submit]'); await page.waitForSelector('#orderDone:not([hidden])'); await page.waitForTimeout(300);
         await audit(page, `order confirmation (${label})`);
         await page.click('[data-order-close]'); await page.waitForFunction(() => !document.querySelector('#orderModal.open'));
+        // نحاكي حدث beforeinstallprompt الذي يطلقه المتصفح فعلاً لتظهر بطاقة تثبيت التطبيق بسرعة.
         await page.evaluate(() => { window.__installDelayMs = 50; const e = new Event('beforeinstallprompt', { cancelable: true }); e.prompt = async () => {}; e.userChoice = Promise.resolve({ outcome: 'dismissed' }); window.dispatchEvent(e); });
         await page.waitForSelector('.install-card'); await page.waitForTimeout(700);
         await page.evaluate(() => scrollTo({ top: 0, behavior: 'instant' })); // measure from the top, not under the sticky header
@@ -115,6 +138,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
         await audit(page, `products page with sort and availability filters on (${label})`);
         await page.goto(base + '/'); await catalogReady(page);
       }
+      // فحص كل صفحة من PAGES: التحقق من رمز الحالة، وفتح كل أسئلة الأسئلة الشائعة، ثم axe.
       for (const [name, url, status] of PAGES) {
         const resp = await page.goto(base + url);
         if (!resp || resp.status() !== status) fail(`${name} (${label}) — HTTP ${resp && resp.status()}, expected ${status}`);
@@ -131,6 +155,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
           await audit(page, `contact page after sending (${label})`);
         }
       }
+      // ---- لوحة الإدارة: تسجيل الدخول ثم النظرة العامة بالمدى 7/30/90 يوماً بعد إنشاء طلب لتظهر الرسوم ----
       await page.goto(base + '/privacy'); await audit(page, `privacy page (${label})`);
       await page.goto(base + '/admin/'); await page.waitForSelector('#loginForm'); await audit(page, `admin login (${label})`);
       await adminLogin(page);
@@ -145,6 +170,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
         await page.reload(); await page.waitForSelector('#chOrders'); await page.waitForTimeout(800);
         await audit(page, `admin dashboard range ${r} with data (${label})`);
       }
+      // بقية أقسام اللوحة؛ في الرسائل نتأكد أن الحالتين (جديدة ومعالجة) ظاهرتان فعلاً.
       for (const p of ['products', 'orders', 'messages', 'categories', 'settings']) {
         await page.evaluate(x => navigate(x), p); await page.waitForTimeout(700);
         if (p === 'messages') {
@@ -157,6 +183,7 @@ const freePort = () => new Promise(r => { const s = net.createServer(); s.listen
       await page.evaluate(() => navigate('products')); await page.waitForSelector('#addProduct'); await page.click('#addProduct'); await page.waitForSelector('#productForm'); await audit(page, `admin product form (${label})`);
       await ctx.close();
     }
+  // تنظيف: إغلاق المتصفح وإيقاف الخادم المؤقت وحذف مجلد بياناته حتى عند حدوث خطأ.
   } finally { await browser.close(); srv.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
   console.log(failures ? `\n${failures} violation group(s)` : '\nno axe violations'); process.exit(failures ? 1 : 0);
 })();

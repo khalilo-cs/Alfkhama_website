@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف network_security_config.xml (الإصدار): يمنع أي اتصال غير مشفّر على مستوى النظام. -->
+<!-- نسخة debug تستبدله بملف في app/src/debug/res/xml بنفس الاسم. -->
 <!-- Release: HTTPS only, system certificate authorities only. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف strings.xml: كل نصوص الواجهة العربية (أزرار، رسائل الأخطاء، نافذة عنوان الخادم). الكود -->
+<!-- يشير إليها بـ R.string. -->
 <resources>
     <string name="ok">حسنًا</string>
     <string name="splash_title">الفخامة</string>
@@ -6,6 +8,7 @@
     <string name="cancel">إلغاء</string>
     <string name="retry">إعادة المحاولة</string>
 
+    <!-- === رسائل أخطاء التحميل (تُعرض في شاشة الخطأ في MainActivity) === -->
     <string name="err_offline_title">تعذّر الاتصال بالخادم</string>
     <string name="err_offline_message">تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.</string>
     <string name="err_server_title">الخادم غير متاح مؤقتًا</string>
@@ -17,6 +20,7 @@
     <string name="err_not_configured_title">التطبيق غير مهيأ</string>
     <string name="err_not_configured_message">لم يُضبط عنوان الخادم لهذا الإصدار. ثبّت الإصدار الرسمي من المتجر أو تواصل مع المطوّر.</string>
 
+    <!-- === رسائل الروابط والملفات والتنزيل === -->
     <string name="link_blocked">تعذّر فتح هذا الرابط</string>
     <string name="no_app_for_link">لا يوجد تطبيق يفتح هذا الرابط</string>
     <string name="no_file_picker">لا يوجد تطبيق لاختيار الملفات على هذا الجهاز</string>

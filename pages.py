@@ -9,17 +9,25 @@ Rules kept here:
 - no inline event handlers, no javascript: URLs, no external hosts (strict CSP with per-response nonces);
 - no invented facts: only the store settings, the catalogue and the services the shop already lists.
 """
+# الغرض من الملف: توليد صفحات المتجر الفرعية (المنتجات، الأقسام، المنتج، من نحن، التواصل، الأسئلة الشائعة، 404)
+# على شكل نصوص HTML من دوال نقية (تأخذ بيانات وتُرجع نصًا دون قراءة قاعدة البيانات أو الملفات).
+# موقعه في المشروع: app.py يجلب البيانات ثم يستدعي هذه الدوال ويدمج الناتج داخل قالب index.html عبر fill_shell،
+# فتظهر الصفحة كاملة للزائر ولمحركات البحث حتى قبل تشغيل الجافاسكربت، ثم يضيف سكربت المتجر التفاعل.
+
 from __future__ import annotations
 
 import re
 
 from seo import category_path, esc, product_path
 
+# ---- ثوابت مشتركة ----
+# عنصر مسار التنقل الأول (الرئيسية) المشترك بين كل الصفحات الفرعية.
 HOME_CRUMB = ("الرئيسية", "/")
 ALL_PRODUCTS = "كل المنتجات"
 
 # The single source of the FAQ: rendered on the home page (between <!--faq:start--> and <!--faq:end-->), on /faq and
 # in the FAQPage structured data.
+# كل عنصر زوج (السؤال، الجواب)؛ الأجوبة عامة ولا تَعِد بسعر أو توفر، وتطلب تأكيد التفاصيل من المتجر.
 FAQ = [
     ("كيف أقيس النافذة قبل طلب الستارة؟",
      "قِس عرض النافذة وارتفاعها، ووضّح للمتجر نوع التركيب ومكان المسار الذي تريده. قد تختلف طريقة القياس بحسب نوع الستارة، لذلك أكّد الأبعاد النهائية قبل بدء التفصيل."),
@@ -33,6 +41,7 @@ FAQ = [
      "يظهر في أقسام الموقع خيار الستائر الكهربائية. يرجى تأكيد نوع المحرك وطريقة التحكم والتركيب والتوافق مع النافذة قبل الطلب."),
 ]
 
+# قالب أيقونة SVG عامة؛ {w} سُمك الخط و{d} مسارات الرسم. aria-hidden لأن الأيقونة زخرفية ولا يقرؤها قارئ الشاشة.
 _SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="{w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">{d}</svg>'
 
 
@@ -45,6 +54,7 @@ HEART = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-widt
          '<path d="M20.8 8.8c0 5.1-8.8 10.1-8.8 10.1S3.2 13.9 3.2 8.8a4.5 4.5 0 0 1 8.1-2.7.9.9 0 0 0 1.4 0 4.5 4.5 0 0 1 8.1 2.7Z"/></svg>')
 ARROW = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
          '<path d="M19 12H5m7-7-7 7 7 7"/></svg>')
+# أيقونات الواجهة بالاسم؛ تُستخدم في قوائم المعلومات وصفحة 404.
 ICONS = {
     "phone": _icon('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>'),
     "chat": _icon('<path d="M20 11.5a8.1 8.1 0 0 1-11.9 7.1L4 20l1.4-3.8A8.1 8.1 0 1 1 20 11.5Z"/><path d="M9 9c.4 1.7 1.4 2.7 3.2 3.5"/>'),
@@ -78,11 +88,13 @@ SERVICES = [
      _icon('<path d="M4 6c2.7-2 5.3 2 8 0s5.3-2 8 0M4 12c2.7-2 5.3 2 8 0s5.3-2 8 0M4 18c2.7-2 5.3 2 8 0s5.3-2 8 0"/>', "1.6")),
 ]
 
+# خيارات الترتيب وأزرار التصفية الإضافية؛ المعرّفات (stockOnly, clearFilters, sortSelect) يقرؤها سكربت المتجر.
 SORT_OPTIONS = ('<option value="featured">ترتيب مقترح</option><option value="newest">الأحدث أولًا</option><option value="low">السعر: الأقل أولًا</option>'
                 '<option value="high">السعر: الأعلى أولًا</option><option value="name">الاسم: أ إلى ي</option>')
 TOOLBAR_EXTRAS = ('<div class="filter-extras"><label class="toggle-chip"><input type="checkbox" id="stockOnly"><span>المتوفر فقط</span></label>'
                   '<button type="button" class="clear-filters" id="clearFilters" data-clear-filters hidden>مسح التصفية</button></div>')
 NEW_TAB = '<span class="sr-only"> (يفتح في نافذة جديدة)</span>'
+# جدول تحويل الأرقام اللاتينية إلى العربية-الهندية (٠١٢...) لعرض الأسعار والأعداد.
 _DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 
 
@@ -95,6 +107,7 @@ def arabic_number(value: int) -> str:
     """1450 -> '١٬٤٥٠' (what Intl.NumberFormat('ar-SA') prints in the storefront script)."""
     return f"{int(value):,}".replace(",", "٬").translate(_DIGITS)
 
+# قواعد العدد في العربية: ١ مفرد، ٢ مثنى، ٣-١٠ جمع، وما فوق ذلك مفرد منصوب (باقي القسمة على ١٠٠ يحدد الصيغة).
 def count_ar(n: int, unit: str = "product") -> str:
     """Arabic number agreement: منتج واحد / منتجان / ٣ منتجات / ١١ منتجًا (and قطعة / قطعتان / قطع / قطعة)."""
     n = int(n or 0)
@@ -106,12 +119,14 @@ def count_ar(n: int, unit: str = "product") -> str:
     return f"{arabic_number(n)} {few if 3 <= n % 100 <= 10 else many}"
 
 
+# يكتب المدينة والهاتف داخل التذييل في الخادم نفسه كي تظهر لمن عطّل الجافاسكربت ولزواحف محركات البحث.
 def fill_store(document: str, settings: dict) -> str:
     """The footer's city and phone come from the settings in the HTML itself (no-JS visitors and crawlers never
     see the template's placeholders)."""
     city = settings.get("city") or "جدة"
     out = document.replace("<span data-store-city>أضف المدينة</span>", f"<span data-store-city>{esc(city)}</span>")
     phone = settings.get("phone") or ""
+    # نُبقي الأرقام وعلامة + فقط للرابط tel:، ولا نعرض الهاتف كرابط إلا إذا كان فيه 6 أرقام على الأقل.
     tel = re.sub(r"[^\d+]", "", phone)
     contact = (f'<a href="tel:{esc(tel)}" dir="ltr">{esc(phone)}</a>' if len(re.sub(r"\D", "", tel)) >= 6
                else esc(settings.get("whatsapp") or "تواصل معنا من صفحة التواصل"))
@@ -119,6 +134,7 @@ def fill_store(document: str, settings: dict) -> str:
 
 
 
+# السعر 0 (أو قيمة غير صالحة) يعني «السعر حسب الطلب»: يُحدَّد بعد تأكيد المقاس والخامة مع العميل.
 def on_request(product: dict) -> bool:
     try:
         return int(product.get("price") or 0) <= 0
@@ -133,6 +149,7 @@ def price_html(product: dict) -> str:
     return f'{arabic_number(product["price"])} <small>ر.س</small>'
 
 
+# المنتج متوفر إذا كان المخزون رقمًا أكبر من صفر؛ أي قيمة غير رقمية تُعدّ غير متوفرة.
 def in_stock(product: dict) -> bool:
     try:
         return int(product.get("stock") or 0) > 0
@@ -140,17 +157,20 @@ def in_stock(product: dict) -> bool:
         return False
 
 
+# حماية: لا يُسمح في href إلا بروابط http/https خالية من علامات الاقتباس والأقواس، فيُمنع javascript: وdata:.
 def web_url(url: str) -> str:
     """Only http(s) links may end up in an href (no javascript:, data: ...)."""
     url = (url or "").strip()
     return url if re.fullmatch(r"https?://[^\s\"'<>`]+", url, re.I) else ""
 
 
+# يبني رابط اتصال tel: من الأرقام وعلامة + فقط، ويُرجع نصًا فارغًا إذا كان الرقم قصيرًا جدًا.
 def tel_href(phone: str) -> str:
     digits = "".join(c for c in (phone or "") if c.isdigit() or c == "+")
     return f"tel:{digits}" if len(re.sub(r"\D", "", digits)) >= 6 else ""
 
 
+# رابط واتساب wa.me يحتاج أرقامًا فقط بصيغة دولية (8 أرقام على الأقل)، وإلا يُرجع نصًا فارغًا.
 def whatsapp_href(number: str) -> str:
     digits = re.sub(r"\D", "", number or "")
     return f"https://wa.me/{digits}" if len(digits) >= 8 else ""
@@ -168,6 +188,8 @@ def paragraphs(text: str, cls: str = "") -> str:
     return "".join(f"<p{attr}>{text_lines(b)}</p>" for b in blocks)
 
 
+# تطبيع البحث العربي: نحذف التشكيل (U+064B-065F) وألف الخنجر (U+0670) والتطويل (U+0640)، ونوحّد صيغ الألف والياء
+# والتاء المربوطة والهمزات والأرقام العربية/الفارسية، فيجد من يكتب «ستاره» المنتج المكتوب «ستارة».
 _AR_MARKS = re.compile("[\u064B-\u065F\u0670\u0640]")
 _AR_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ة": "ه", "ؤ": "و", "ئ": "ي",
                           **{c: str(i) for i, c in enumerate("٠١٢٣٤٥٦٧٨٩")}, **{c: str(i) for i, c in enumerate("۰۱۲۳۴۵۶۷۸۹")}})
@@ -209,6 +231,7 @@ def page_hero(crumbs, *, eyebrow: str, title: str, intro_html: str = "", extra: 
             f'<span class="eyebrow">{esc(eyebrow)}</span><h1 id="pageTitle">{esc(title)}</h1>{intro}{extra}</div></section>')
 
 
+# بطاقة المنتج: خصائص data-favorite وdata-quick يلتقطها سكربت المتجر لإضافة المفضلة والعرض السريع.
 def product_card(p: dict) -> str:
     """Exactly the card the storefront script's renderProducts() builds (not yet a favourite), except that the name
     links to the product's own page."""
@@ -339,6 +362,7 @@ def render_categories(settings: dict, categories: list[dict]) -> str:
                        [("/contact", "تواصل معنا", True), ("/products", ALL_PRODUCTS, False)]))
 
 
+# شريط روابط الأقسام في أعلى صفحة القسم؛ القسم الحالي يحمل aria-current ليميّزه قارئ الشاشة.
 def category_switch(categories: list[dict], current: str) -> str:
     links = [f'<li><a href="/products">{ALL_PRODUCTS}</a></li>']
     for c in categories:
@@ -365,6 +389,7 @@ def render_category(settings: dict, category: dict, categories: list[dict], prod
                        [("/contact", "تواصل معنا", True), ("/categories", "كل الأقسام", False)]))
 
 
+# صفحة المنتج: المعرّفات data-add-product وdata-copy-link وdata-page-gindex هي نقاط الربط مع سكربت المتجر.
 def render_product(settings: dict, product: dict, related: list[dict], base: str) -> str:
     """/product/<slug> — a real page: gallery, details, add to cart, share, notes, and related products."""
     from urllib.parse import quote  # local: only this page builds share links
@@ -400,6 +425,7 @@ def render_product(settings: dict, product: dict, related: list[dict], base: str
         add = f'<button class="btn btn-primary" type="button" data-add-product="{pid}">أضف إلى السلة {ARROW}</button>'
     else:
         add = f'<button class="btn btn-primary" type="button" data-add-product="{pid}" disabled>غير متوفر حاليًا</button>'
+    # رابط مشاركة واتساب: النص (الاسم + المتجر + الرابط) يُرمَّز كاملًا بـ quote(safe="") كي لا يكسر الرابط.
     share = "https://wa.me/?text=" + quote(f"{product['name']} — {store_name(settings)}\n{url}", safe="")
     notes = []
     if on_request(product):
@@ -407,6 +433,7 @@ def render_product(settings: dict, product: dict, related: list[dict], base: str
     if (settings.get("delivery_note") or "").strip():
         notes.append(settings["delivery_note"].strip())
     try:
+        # رسوم التوصيل من الإعدادات قد تكون نصًا؛ القيمة غير الرقمية تُعامل كصفر فلا تظهر ملاحظة رسوم.
         fee = int(settings.get("delivery_fee") or 0)
     except (TypeError, ValueError):
         fee = 0
@@ -469,6 +496,9 @@ def render_about(settings: dict, categories: list[dict], image: tuple[str, str] 
     return hero + story + offer + visit + cta
 
 
+# نموذج التواصل. يعمل بدون جافاسكربت (method=post إلى /api/contact) ويحافظ على ما كتبه الزائر عند الخطأ عبر values.
+# حقل website المخفي (class=hp) فخّ للروبوتات: الإنسان لا يراه فيتركه فارغًا، والخادم يقبل ما تملؤه الروبوتات ظاهريًا دون حفظه.
+# مربع الموافقة على سياسة الخصوصية إلزامي، وكل قيمة قادمة من الزائر تمر عبر esc() قبل وضعها في الصفحة.
 def contact_form(values: dict | None = None, notice: tuple[str, str] | None = None) -> str:
     v = {k: str(x) for k, x in (values or {}).items() if isinstance(x, (str, int))}
     state, message = notice or ("", "")
@@ -521,6 +551,7 @@ def render_faq(settings: dict) -> str:
                        [("/contact", "تواصل معنا", True), ("/products", "تصفّح المنتجات", False)]))
 
 
+# نص تمهيدي لصفحة 404 بحسب ما لم يُعثر عليه (منتج أو قسم أو صفحة).
 NOT_FOUND_INTRO = {
     "product": "هذا المنتج غير متاح حاليًا أو تغيّر رابطه. ابحث في المنتجات أو انتقل إلى أحد الأقسام.",
     "category": "هذا القسم غير متاح حاليًا أو تغيّر رابطه. ابحث في المنتجات أو انتقل إلى الأقسام.",
@@ -546,10 +577,12 @@ def render_not_found(settings: dict, kind: str = "page") -> str:
 
 
 # -- shell ------------------------------------------------------------------------------------------------------------
+# علامات التعليق في index.html التي يحدد الخادم بينها محتوى الصفحة وكتلة الأسئلة الشائعة.
 MAIN_START, MAIN_END = "<!--main:start-->", "<!--main:end-->"
 FAQ_START, FAQ_END = "<!--faq:start-->", "<!--faq:end-->"
 
 
+# يستبدل ما بين علامتين بمحتوى جديد مع إبقاء العلامتين؛ غيابهما خطأ برمجي يُرفع صراحة بدل إخراج صفحة ناقصة.
 def _swap(document: str, start: str, end: str, content: str) -> str:
     i, j = document.find(start), document.find(end)
     if i < 0 or j < i:
@@ -562,6 +595,7 @@ def fill_home_faq(document: str) -> str:
     return _swap(document, FAQ_START, FAQ_END, render_faq_items())
 
 
+# علامات كتلة موافقة ملفات الارتباط وزر الإعدادات في التذييل (تُملأ فقط عند ضبط معرّف Google Analytics).
 CONSENT_START, CONSENT_END = "<!--consent:start-->", "<!--consent:end-->"
 COOKIE_SETTINGS_MARK = "<!--cookie-settings-->"
 COOKIE_SETTINGS_LABEL = "إعدادات ملفات التعريف"
@@ -583,6 +617,7 @@ def consent_banner(ga4_id: str) -> str:
             '<button type="button" class="btn consent-btn" id="consentReject">رفض</button></div></div></section>')
 
 
+# بدون معرّف GA4 لا يظهر الشريط ولا الزر ولا يُحمَّل شيء من Google، فتبقى الصفحة وسياسة CSP كما هي.
 def fill_consent(document: str, ga4_id: str) -> str:
     """With a GA4 ID: the consent banner and the footer «إعدادات ملفات التعريف» button. Without one: neither
     (the page stays exactly as before: no banner, no Google requests, the same CSP)."""
@@ -599,21 +634,27 @@ def fill_shell(document: str, main: str, page: str, attrs: dict | None = None, *
     out = _swap(document, MAIN_START, MAIN_END, main)
     data = {"page": page, **(attrs or {})}
     body = "<body " + " ".join(f'data-{k}="{esc(v)}"' for k, v in data.items()) + ">"
+    # نستبدل وسم <body> بوسم يحمل data-page وغيره من الخصائص (مُهرَّبة بـ esc)؛ نتأكد أن الاستبدال تم مرة واحدة فقط.
     out, count = re.subn(r"<body\b[^>]*>", lambda _m: body, out, count=1)
     if count != 1:
         raise RuntimeError("index.html is missing its <body> tag")
+    # أنماط الصفحات الفرعية تُحقن مرة واحدة داخل <style>؛ app.py يضيف لها nonce الاستجابة فتتوافق مع CSP بدون unsafe-inline.
     out = out.replace("</head>", f'<style id="pageStyles">{PAGE_CSS}</style>\n</head>', 1)
+    # تمييز رابط الصفحة الحالية في القائمة الرئيسية بـ aria-current (يتخطى الروابط التي تحمله أصلًا).
     if nav_path:
         def mark(m: re.Match) -> str:
             return re.sub(r'<a\b(?![^>]*aria-current)([^>]*\bhref="' + re.escape(nav_path) + '")',
                           lambda a: '<a aria-current="page"' + a.group(1), m.group(0))
         out = re.sub(r'<nav\b[^>]*\bid="mainNav"[^>]*>.*?</nav>', mark, out, count=1, flags=re.S)
+    # عند البحث ?q= نملأ حقل البحث في الترويسة بالقيمة (مُهرَّبة) ليبقى ما كتبه الزائر ظاهرًا.
     if search:
         out = re.sub(r'(<input\b[^>]*\bid="searchInput")', lambda m: f'{m.group(1)} value="{esc(search)}"', out, count=1)
     return out
 
 
 # -- page stylesheet (injected once into <head>; uses the shell's tokens) --------------------------------------------
+# ---- أنماط الصفحات الفرعية ----
+# سلسلة CSS واحدة تُحقن في <head>؛ تستعمل متغيرات الألوان والخطوط المعرّفة في ملف أنماط القالب (--night, --gold ...).
 PAGE_CSS = """
 /* pages:start — server-rendered sub-pages (pages.py). Night & gold, RTL, 390px-safe, reduced-motion safe. */
 .page-hero{position:relative;isolation:isolate;overflow:hidden;background:radial-gradient(ellipse 55% 85% at 92% 0%,rgba(201,164,100,.26),transparent 62%),radial-gradient(ellipse 45% 70% at 0% 100%,rgba(201,164,100,.12),transparent 60%),var(--night);color:var(--ivory);padding:26px 0 70px}

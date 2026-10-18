@@ -14,6 +14,10 @@ Default output: dist/CLIENT_HANDOVER/ (git-ignored). The script
   - adds FIGMA.txt, CHANGELOG.txt (git log) and .env.example.
 Needs: git, Python 3.10+, Node with Playwright (NODE_PATH=$(npm root -g) is set automatically when missing).
 """
+# # الغرض من الملف: أداة مطوّر (ليست جزءًا من الموقع أثناء التشغيل) تجمع «حزمة التسليم» للعميل في مجلد واحد:
+# # الكود المصدري، مخطط قاعدة البيانات، لقطات الشاشات، ملفات PDF من وثائق docs/handover، ونظام التصميم.
+# # تعتمد على مكتبة بايثون القياسية فقط، وتستدعي tools/render_pdf.cjs (Playwright) لتحويل HTML إلى PDF ولأخذ اللقطات.
+
 from __future__ import annotations
 
 import argparse
@@ -36,6 +40,8 @@ from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from pathlib import Path
 
+# # ---- المسارات والثوابت ----
+# # جذر المشروع (مجلد أعلى من tools/) ومسارات الوثائق والخطوط وسكربت العرض.
 ROOT = Path(__file__).resolve().parent.parent
 HANDOVER_DOCS = ROOT / "docs" / "handover"
 DESIGN_PAGE = ROOT / "docs" / "design" / "design-system.html"
@@ -56,26 +62,33 @@ DOCS = [
     ("04-API-Documentation.md", "07-API/API-Documentation.pdf", "توثيق واجهة البرمجة (API)"),
     ("08-License-and-Scope.md", "08-License/License-and-Scope.pdf", "الترخيص ونطاق العمل (نموذج)"),
 ]
+# # الصفحات التي تُلتقط لها صور: (اسم الملف، المسار) للمتجر، و(اسم الملف، معرّف الصفحة داخل لوحة الإدارة) للإدارة.
 PUBLIC_SCREENS = [("home", "/"), ("products", "/products"), ("categories", "/categories"),
                   ("category-curtains", "/category/curtains"), ("product-wavy-03", "/product/wavy-03"),
                   ("about", "/about"), ("contact", "/contact"), ("faq", "/faq"), ("not-found-404", "/this-page-does-not-exist")]
 ADMIN_SCREENS = [("dashboard", "overview"), ("products", "products"), ("orders", "orders"), ("messages", "messages"),
                  ("statistics", "analytics"), ("categories", "categories"), ("settings", "settings")]
+# # عرضا الشاشة بالبكسل: هاتف (390) وحاسوب (1366).
 WIDTHS = [390, 1366]
 # Files that must never be delivered (secrets, local databases, signing keys).
+# # حماية: أسماء ملفات لا يجوز تسليمها أبدًا (أسرار .env، قواعد البيانات الحية، مفاتيح التوقيع)؛ يُفحص بها الأرشيف والحزمة.
 FORBIDDEN = re.compile(r"(?:^|/)(?:\.env|store\.db(?:-wal|-shm)?|keystore\.properties|local\.properties|[^/]*\.jks|[^/]*\.keystore|[^/]*\.pid)$")
+# # بيانات تجريبية تُحفظ في الخادم المؤقت فقط لتظهر الصفحات في اللقطات بشكل مكتمل.
 CATEGORY_DESCRIPTION = ("ستائر ويفي بطيّات متموجة تُفصَّل حسب مقاس النافذة. يتحدد السعر النهائي بحسب المقاس والخامة واللون، "
                         "ويؤكده المتجر معك قبل البدء.")
 EXAMPLE_MESSAGE = {"name": "عميل تجريبي (مثال)", "phone": "0500000000", "email": "",
                    "message": "رسالة تجريبية لعرض صندوق الرسائل في حزمة التسليم: أرغب في الاستفسار عن ستائر ويفي لنافذة صالة.",
                    "page": "/contact", "consent": True, "website": ""}
+# # فتح اتصالات بلا وكيل (proxy) لأن الخادم المؤقت يعمل على الجهاز نفسه (127.0.0.1).
 NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # the throw-away server is on loopback
 
 
+# # طباعة فورية (flush) لرسائل التقدم.
 def log(message: str) -> None:
     print(message, flush=True)
 
 
+# # تشغيل أمر وإرجاع مخرجاته؛ check=True يرفع استثناءً عند فشله فيتوقف البناء بدل المتابعة بنتيجة ناقصة.
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, text=True, capture_output=True, **kw)
 
@@ -83,20 +96,28 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
 # ---------------------------------------------------------------------------------------------------------------------
 # Markdown -> HTML (the subset the handover documents use: headings, paragraphs, lists, tables, code, quotes, links)
 # ---------------------------------------------------------------------------------------------------------------------
+# # ---- تحويل Markdown إلى HTML ----
+# # مُحوِّل صغير يغطي ما تستخدمه وثائق التسليم فقط (عناوين، فقرات، قوائم، جداول، كود، اقتباسات، روابط).
+# # التعابير النمطية التالية تلتقط: الكود بين علامات ` ، الروابط [نص](عنوان) ، الخط العريض ** ، والمائل *.
 INLINE_CODE = re.compile(r"(`+)(.+?)\1")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 BOLD = re.compile(r"\*\*(.+?)\*\*")
+# # المائل بنجمة واحدة فقط وليس بجوار حرف أو مسافة، كي لا تُفسَّد عمليات الضرب أو النجوم المنفردة.
 ITALIC = re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])")
+# # رموز الحالة في الجداول (✓ ⚠ ✗) تُلوَّن بصنف CSS مناسب.
 STATUS = {"✓": "ok", "⚠": "warn", "✗": "bad"}
 
 
+# # رابط http(s) مجرد في النص؛ الجزء الأخير يستثني علامات الترقيم في آخره (نقطة، فاصلة، ...).
 BARE_URL = re.compile(r"https?://[^\s<>()\[\]،]+[^\s<>()\[\].,،:;!?]")
 
 
+# # يطبّق العريض ثم المائل على نص مُهرَّب مسبقًا.
 def emphasis(text: str) -> str:
     return ITALIC.sub(r"<em>\1</em>", BOLD.sub(r"<strong>\1</strong>", text))
 
 
+# # تحويل التنسيق داخل السطر. الترتيب مهم: ما يجب ألا يُنسَّق (الكود والروابط) يُستبدل بعلامات مؤقتة \x00رقم\x00 أولًا ثم يُعاد.
 def inline(text: str) -> str:
     """Code spans, links and bare URLs are swapped for placeholders first, so nothing inside them is re-formatted."""
     held: list[str] = []
@@ -105,6 +126,7 @@ def inline(text: str) -> str:
         held.append(markup)
         return f"\x00{len(held) - 1}\x00"
 
+    # # المسافات الطويلة داخل الكود: نسمح بالتفاف السطر بعد / , = & ? بإضافة <wbr> حتى لا يخرج النص عن عرض الصفحة في الـPDF.
     def code(m: re.Match) -> str:
         body = html.escape(m.group(2).strip())
         if len(body) > 14:  # long paths may wrap after a slash rather than mid-word
@@ -112,8 +134,10 @@ def inline(text: str) -> str:
         return hold(f'<code dir="ltr">{body}</code>')
 
     text = INLINE_CODE.sub(code, text)
+    # # الهروب بشرطة عكسية (\* \_ ...) يعني حرفًا عاديًا، فيُحفظ كما هو دون تنسيق.
     text = re.sub(r"\\([*_`|\[\]\\#])", lambda m: hold(html.escape(m.group(1))), text)  # \* and friends: literal
 
+    # # الرابط الذي نصه عنوان إنترنت يُكتب من اليسار لليمين حتى لا ينعكس في النص العربي؛ والعنوان يُهرَّب بـ quote=True.
     def link(m: re.Match) -> str:
         label, url = m.group(1), m.group(2)
         direction = ' dir="ltr"' if BARE_URL.fullmatch(label) else ""
@@ -122,23 +146,28 @@ def inline(text: str) -> str:
     text = LINK.sub(link, text)
     text = BARE_URL.sub(lambda m: hold(f'<a href="{html.escape(m.group(0), quote=True)}" dir="ltr">{html.escape(m.group(0))}</a>'), text)
     # a [placeholder] left over (not a link) is a field to fill in (the license template)
+    # # ما بقي بين [ ] ولم يكن رابطًا يُعدّ حقلًا يُملأ (مثل قالب الترخيص) ويُبرَز بنمط .fill.
     text = re.sub(r"\[([^\[\]\n]*)\]", lambda m: hold(f'<span class="fill">[{emphasis(html.escape(m.group(1), quote=False))}]</span>'), text)
     text = emphasis(html.escape(text, quote=False))
     # ISO dates and times read left to right inside Arabic text (otherwise the bidi algorithm shows 09-10-2026)
+    # # تواريخ ISO تُعرض من اليسار لليمين، وإلا تُظهرها خوارزمية الاتجاه (bidi) معكوسة داخل النص العربي.
     text = re.sub(r"\b\d{4}-\d{2}-\d{2}(?:[T ][\d:+]+)?\b", lambda m: f'<span dir="ltr">{m.group(0)}</span>', text)
     for symbol, cls in STATUS.items():
         text = text.replace(symbol, f'<span class="st {cls}">{symbol}</span>')
+    # # إعادة العناصر المحفوظة؛ تكرار الحلقة لأن عنصرًا محفوظًا قد يحوي علامة عنصر آخر.
     while "\x00" in text:
         text = re.sub("\x00(\\d+)\x00", lambda m: held[int(m.group(1))], text)
     return text
 
 
+# # معرّفات قصيرة ASCII للعناوين: المعرّفات العربية الطويلة تصبح وجهات مسمّاة طويلة جدًا داخل ملف PDF.
 def slug(text: str, used: dict) -> str:
     """Short ASCII anchors (s1, s2, …): long Arabic ids become over-long named destinations in the PDF."""
     used["n"] = used.get("n", 0) + 1
     return f"s{used['n']}"
 
 
+# # يقسّم صف جدول Markdown عند | مع احترام \| (حرف حقيقي) وعدم القسمة داخل الكود بين علامات `.
 def split_row(line: str) -> list[str]:
     line = line.strip()
     if line.startswith("|"):
@@ -162,10 +191,12 @@ def split_row(line: str) -> list[str]:
     return cells
 
 
+# # عنصر قائمة (نقطة أو رقم) مع مسافة بادئة، وسطر فاصل الجدول |---|---|.
 LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
 TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
 
 
+# # يبني قائمة HTML (ordered/unordered) مع دعم القوائم المتداخلة وعناصر المهام [ ] و[x].
 def render_list(lines: list[str]) -> str:
     """lines: a contiguous list block (items, nested items, continuation lines)."""
     first = LIST_ITEM.match(lines[0])
@@ -200,6 +231,8 @@ def render_list(lines: list[str]) -> str:
     return f"<{tag}{start}>" + "".join(out) + f"</{tag}>"
 
 
+# # يحوّل نص Markdown كاملًا إلى HTML كتلة بعد كتلة: كود محاط بثلاث علامات، عناوين، خط أفقي، جداول، اقتباسات، قوائم، فقرات.
+# # headings: قائمة اختيارية تُملأ بعناوين المستوى الثاني لبناء فهرس المحتويات.
 def md_to_html(text: str, headings: list | None = None) -> str:
     lines = text.replace("\r\n", "\n").split("\n")
     out: list[str] = []
@@ -250,6 +283,7 @@ def md_to_html(text: str, headings: list | None = None) -> str:
             first = LIST_ITEM.match(line)
             top, ordered = len(first.group(1)), first.group(2)[0].isdigit()
 
+            # # عنصر رئيسي من النوع الآخر (مرقّم مقابل نقطي) يبدأ قائمة جديدة.
             def other_list(candidate: str) -> bool:  # a top-level item of the other kind starts a new list
                 m2 = LIST_ITEM.match(candidate)
                 return bool(m2) and len(m2.group(1)) <= top + 1 and m2.group(2)[0].isdigit() != ordered
@@ -280,9 +314,12 @@ def md_to_html(text: str, headings: list | None = None) -> str:
     return "\n".join(out)
 
 
+# # يبني صفحة HTML كاملة للوثيقة: غلاف داكن بالعنوان والإصدار، فهرس (إن وُجدت 4 عناوين فأكثر)، ثم المتن.
+# # الخطوط تُحمَّل من assets/fonts عبر مسار file:// لأن الصفحة تُطبع محليًا بلا إنترنت. الأقواس المزدوجة {{ }} هروب لـ f-string.
 def document_html(markdown: str, meta: dict) -> str:
     headings: list = []
     body = md_to_html(markdown, headings)
+    # # أول <h1> يصير عنوان الغلاف ويُحذف من المتن حتى لا يتكرر.
     title_match = re.search(r"<h1[^>]*>(.*?)</h1>", body, re.S)
     title = re.sub(r"<[^>]+>", "", title_match.group(1)) if title_match else meta["footer"]
     if title_match:
@@ -361,12 +398,16 @@ li:has(>.box){{list-style:none}}
 # ---------------------------------------------------------------------------------------------------------------------
 # throw-away server
 # ---------------------------------------------------------------------------------------------------------------------
+# # ---- الخادم المؤقت ----
+# # يطلب من النظام منفذًا حرًا (المنفذ 0) ثم يقرأ رقمه.
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
+# # بيئة نظيفة للخادم المؤقت: تُحذف أي متغيرات من جهاز المطوّر (كلمة المرور، المنفذ، المجلد...) كي لا تغيّر سلوكه،
+# # ويُوقَف ملف .env بالقيمة ENV_FILE=off. كلمة المرور المؤقتة تُمرَّر عبر البيئة فقط ولا تُكتب على القرص.
 def clean_env(**extra: str) -> dict:
     env = dict(os.environ)
     # nothing from the developer's shell or .env may change how the throw-away store behaves
@@ -377,6 +418,7 @@ def clean_env(**extra: str) -> dict:
     return env
 
 
+# # يشغّل app.py كعملية فرعية في مجلد بيانات مؤقت ومنفذ عشوائي، وينتظر حتى يستجيب /api/health (حتى 15 ثانية تقريبًا).
 class ThrowawayServer:
     def __init__(self, data_dir: Path, password: str):
         self.port = free_port()
@@ -397,6 +439,7 @@ class ThrowawayServer:
         self.stop()
         raise RuntimeError("the throw-away server did not answer /api/health")
 
+    # # إيقاف لطيف (SIGTERM) ثم قتل إجباري إن لم تنتهِ العملية خلال 10 ثوانٍ.
     def stop(self) -> None:
         if self.proc.poll() is None:
             self.proc.terminate()  # SIGTERM to this PID only
@@ -408,6 +451,7 @@ class ThrowawayServer:
         self.log.close()
 
 
+# # نداء JSON إلى الخادم المؤقت؛ ترويسة X-CSRF-Token وملف تعريف الارتباط مطلوبان لعمليات الإدارة. أخطاء HTTP تتحول لاستثناء واضح.
 def api(base: str, method: str, path: str, body: dict | None = None, cookie: str = "", csrf: str = "") -> tuple[int, dict, dict]:
     request = urllib.request.Request(base + path, method=method,
                                      data=None if body is None else json.dumps(body).encode("utf-8"))
@@ -424,6 +468,7 @@ def api(base: str, method: str, path: str, body: dict | None = None, cookie: str
         raise RuntimeError(f"{method} {path} -> HTTP {exc.code}: {exc.read()[:300]!r}") from None
 
 
+# # تعبئة الخادم المؤقت عبر واجهة الإدارة كما يفعل المالك: نص «من نحن» ووصف قسم ورسالة تواصل تجريبية.
 def seed(server: ThrowawayServer, password: str) -> None:
     """An About text, a description for the curtains category and one clearly-marked example contact message."""
     request = urllib.request.Request(server.base + "/api/admin/login", method="POST",
@@ -435,6 +480,7 @@ def seed(server: ThrowawayServer, password: str) -> None:
         for header in r.headers.get_all("Set-Cookie") or []:
             jar.load(header)
     cookie = f"fakhama_admin={jar['fakhama_admin'].value}"
+    # # قراءة الإعدادات الحالية ثم حفظ نص «من نحن» الافتراضي نفسه (لا يُخترع محتوى جديد).
     _, _, current = api(server.base, "GET", "/api/admin/settings", cookie=cookie)
     settings = current["settings"]
     # the shop's own default About text (facts the owner gave), saved through the admin API like the owner would
@@ -451,6 +497,8 @@ def seed(server: ThrowawayServer, password: str) -> None:
 # ---------------------------------------------------------------------------------------------------------------------
 # package parts
 # ---------------------------------------------------------------------------------------------------------------------
+# # ---- أجزاء الحزمة ----
+# # Node يحتاج NODE_PATH ليجد حزمة playwright المثبّتة عالميًا؛ نأخذه من npm root -g إن لم يكن مضبوطًا.
 def node_env() -> dict:
     env = dict(os.environ)
     if not env.get("NODE_PATH"):
@@ -461,6 +509,7 @@ def node_env() -> dict:
     return env
 
 
+# # يكتب المهام في ملف JSON ويشغّل tools/render_pdf.cjs بالوضع المطلوب (pdf أو screens) ويوقف البناء عند فشله.
 def render(mode: str, payload, scratch: Path, env: dict | None = None) -> None:
     job = scratch / f"{mode}-jobs.json"
     job.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -471,6 +520,7 @@ def render(mode: str, payload, scratch: Path, env: dict | None = None) -> None:
         raise SystemExit(f"tools/render_pdf.cjs {mode} failed (exit {result.returncode})")
 
 
+# # أرشيف الكود من آخر commit (git archive HEAD) فلا يدخل .env المتجاهل من git، ثم يُفحص بـ FORBIDDEN كطبقة حماية ثانية.
 def build_source_zip(out: Path) -> None:
     target = out / "01-Website" / "source-code.zip"
     target.parent.mkdir(parents=True)
@@ -480,12 +530,14 @@ def build_source_zip(out: Path) -> None:
     if bad:
         target.unlink()
         raise SystemExit("source-code.zip would contain files that must never be delivered: " + ", ".join(bad))
+    # # تنبيه: التعديلات غير المحفوظة في commit لا تدخل الأرشيف، فيُخبَر المطوّر بها.
     dirty = run(["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"]).stdout.strip()
     if dirty:
         log("NOTE: source-code.zip is the last commit (HEAD); uncommitted changes to tracked files are NOT in it:\n  "
             + dirty.replace("\n", "\n  "))
 
 
+# # يبني مخطط قاعدة البيانات ونموذجًا منها من قاعدة جديدة تمامًا في مجلد مؤقت (لا بيانات حقيقية ولا حسابات إدارة).
 def build_database(out: Path, scratch: Path) -> None:
     folder = out / "02-Database"
     folder.mkdir(parents=True)
@@ -497,6 +549,7 @@ def build_database(out: Path, scratch: Path) -> None:
     run([sys.executable, "-I", str(ROOT / "app.py"), "export-sql", str(folder / "database-sample.sql")], cwd=data, env=env)
     conn = sqlite3.connect(data / "store.db")
     try:
+        # # المخطط يُقرأ من sqlite_master (الجداول ثم الفهارس) لا من نص ثابت، فيطابق دائمًا ما ينشئه init_db.
         tables = conn.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid").fetchall()
         indexes = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL ORDER BY rowid").fetchall()
         version = re.search(r'^VERSION = "([^"]+)"', (ROOT / "app.py").read_text(encoding="utf-8"), re.M).group(1)
@@ -509,6 +562,7 @@ def build_database(out: Path, scratch: Path) -> None:
     lines += [sql.strip() + ";\n" for _name, sql in tables]
     lines += [sql.strip() + ";" for (sql,) in indexes]
     (folder / "schema.sql").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # # عدّ أسطر INSERT لكل جدول في النموذج لتلخيصها في README.
     counts = {}
     sample = (folder / "database-sample.sql").read_text(encoding="utf-8")
     for table in re.findall(r'^INSERT INTO "([^"]+)"', sample, re.M):
@@ -541,6 +595,7 @@ database-sample.sql
 """, encoding="utf-8")
 
 
+# # يجهّز مجلد 04-Design: ينسخ الأصول التي تشير إليها الصفحة (../../assets/) إلى جوارها ويعدّل المسارات لتعمل مستقلة.
 def copy_design(out: Path) -> Path:
     """docs/design/design-system.html -> 04-Design/ with the files it references under ../../assets/ copied next to it."""
     folder = out / "04-Design"
@@ -548,6 +603,7 @@ def copy_design(out: Path) -> Path:
     page = DESIGN_PAGE.read_text(encoding="utf-8")
     refs = sorted(set(re.findall(r"\.\./\.\./assets/([A-Za-z0-9._/-]+)", page)))
     for ref in refs:
+        # # حماية: لا يُنسخ إلا ما كان داخل مجلد assets الفعلي (يمنع الخروج منه بمسارات مثل ../).
         source = (ROOT / "assets" / ref).resolve()
         if not source.is_relative_to((ROOT / "assets").resolve()) or not source.is_file():
             raise SystemExit(f"design-system.html references a missing file: assets/{ref}")
@@ -561,6 +617,7 @@ def copy_design(out: Path) -> Path:
     return target
 
 
+# # يكتب ملفات النص: FIGMA.txt وCHANGELOG.txt (من git log) و.env.example.
 def write_texts(out: Path, meta: dict) -> None:
     (out / "04-Design" / "FIGMA.txt").write_text(f"""{STORE} — ملف التصميم في Figma
 ==========================================
@@ -590,12 +647,14 @@ def write_texts(out: Path, meta: dict) -> None:
     history = re.sub(r"\n{3,}", "\n\n", history).strip()
     (out / "CHANGELOG.txt").write_text(f"{STORE} — سجل التغييرات (git log)\nالمراجعة الحالية: {meta['commit']} — {meta['date']}\n"
                                        + "=" * 60 + "\n\n" + history + "\n", encoding="utf-8")
+    # # حماية: قالب البيئة يجب ألا يحوي قيمة كلمة مرور حقيقية؛ وإلا يُرفض التسليم.
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
     if re.search(r"^[ \t]*ADMIN_PASSWORD[ \t]*=[ \t]*[^\s#]", example, re.M):
         raise SystemExit(".env.example contains a password value; refusing to deliver it")
     (out / ".env.example").write_text(example, encoding="utf-8")
 
 
+# # فحص أخير: كلمة المرور المؤقتة لا يجوز أن تظهر في أي ملف مُسلَّم، حتى داخل أرشيف ZIP.
 def check_no_secret(out: Path, secret: str) -> None:
     """The throw-away admin password must not appear in any delivered file (also inside the source zip)."""
     needle = secret.encode()
@@ -614,6 +673,7 @@ def check_no_secret(out: Path, secret: str) -> None:
                         raise SystemExit(f"a temporary password leaked into {file.name}:{name}")
 
 
+# # لا يمسح مجلدًا إلا إذا كان فارغًا أو يبدو حزمة تسليم سابقة، تجنبًا لحذف مجلد مهم بالخطأ عند خطأ في --out.
 def prepare_out(out: Path) -> None:
     if out.exists():
         entries = list(out.iterdir())
@@ -623,6 +683,7 @@ def prepare_out(out: Path) -> None:
     out.mkdir(parents=True)
 
 
+# # تنسيق حجم الملف (B/KB/MB/GB).
 def human(size: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024 or unit == "GB":
@@ -631,12 +692,14 @@ def human(size: int) -> str:
     return str(size)
 
 
+# # نقطة الدخول: 6 خطوات (الكود، قاعدة البيانات، التصميم، اللقطات، الوثائق، النصوص) داخل مجلد مؤقت يُحذف بعد الانتهاء.
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the client handover package.")
     parser.add_argument("--out", default=str(ROOT / "dist" / "CLIENT_HANDOVER"), help="output folder (default: dist/CLIENT_HANDOVER)")
     parser.add_argument("--no-screens", action="store_true", help="skip the screenshots (faster; for checking the documents)")
     args = parser.parse_args()
     out = Path(args.out).expanduser().resolve()
+    # # حماية: لا يُسمح بمجلد إخراج هو المشروع نفسه أو أحد آبائه لأن prepare_out يحذف محتواه.
     if out == ROOT or ROOT.is_relative_to(out):
         raise SystemExit("--out must not be the repository itself or one of its parents")
 
@@ -644,6 +707,7 @@ def main() -> int:
     version = re.search(r'^VERSION = "([^"]+)"', (ROOT / "app.py").read_text(encoding="utf-8"), re.M).group(1)
     meta = {"commit": commit, "version": version, "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
     prepare_out(out)
+    # # كلمة مرور عشوائية للخادم المؤقت فقط؛ تُمرَّر بالبيئة ولا تُحفظ، ويتحقق check_no_secret من عدم تسربها.
     password = "Hv" + secrets.token_urlsafe(24)
 
     with tempfile.TemporaryDirectory(prefix="handover-") as tmp:
@@ -697,5 +761,6 @@ def main() -> int:
     return 0
 
 
+# # ---- التشغيل ----
 if __name__ == "__main__":
     sys.exit(main())

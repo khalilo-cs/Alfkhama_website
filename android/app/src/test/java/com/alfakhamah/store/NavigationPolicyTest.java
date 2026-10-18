@@ -1,3 +1,6 @@
+// ملف NavigationPolicyTest.java: اختبارات JUnit لسياسة التنقل (NavigationPolicy). تثبت أن روابط متجرنا والإدارة
+// تُحمَّل داخل التطبيق، وأن المواقع الأخرى تُفتح خارجيًا، وأن البروتوكولات الخطرة تُحظر.
+// تعمل على الجهاز المحلي دون محاكي (gradlew testDebugUnitTest).
 package com.alfakhamah.store;
 
 import static com.alfakhamah.store.NavigationPolicy.Action.BLOCK;
@@ -10,13 +13,16 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public class NavigationPolicyTest {
+    // نطاق تجريبي وهمي؛ لا علاقة له بنطاق الإنتاج.
     private static final String ORIGIN = "https://shop.example.com";
     private final NavigationPolicy policy = new NavigationPolicy(ORIGIN);
 
+    // دالة مساعدة تقارن القرار المتوقع وتطبع الرابط في رسالة الفشل.
     private void check(String url, NavigationPolicy.Action expected) {
         assertEquals(url, expected, policy.decide(url));
     }
 
+    // ---- الروابط التي تبقى داخل التطبيق ----
     @Test
     public void storefrontAndAdminPanelBothLoadInsideTheApp() {
         check(ORIGIN + "/", LOAD_IN_APP);
@@ -29,6 +35,7 @@ public class NavigationPolicyTest {
         check(ORIGIN + "/api/admin/export/orders.csv", LOAD_IN_APP);
     }
 
+    // ---- مواقع أخرى: تشمل محاولات تقليد النطاق (نطاق فرعي أو منفذ مختلف أو رابط داخل رابط) ----
     @Test
     public void otherWebsitesOpenInTheSystemBrowser() {
         check("https://maps.app.goo.gl/kn2kxuPujQT9raLG7?g_st=awb", OPEN_EXTERNALLY);
@@ -39,6 +46,7 @@ public class NavigationPolicyTest {
         check("https://sub.shop.example.com/", OPEN_EXTERNALLY);
     }
 
+    // ---- خفض الأمان من https إلى http على مضيفنا يُحظر ----
     @Test
     public void downgradeToCleartextOnOurHostIsBlocked() {
         check("http://shop.example.com/", BLOCK);
@@ -46,6 +54,7 @@ public class NavigationPolicyTest {
         check("http://other.example.org/", OPEN_EXTERNALLY);
     }
 
+    // ---- بروتوكولات النظام المسموحة (اتصال، بريد، رسائل، خريطة) وحظر ما عداها ----
     @Test
     public void systemSchemesAreForwardedAndEverythingElseIsBlocked() {
         check("tel:+966576486491", OPEN_EXTERNALLY);
@@ -67,6 +76,7 @@ public class NavigationPolicyTest {
         check("not a url", BLOCK);
     }
 
+    // ---- تمييز منطقة الإدارة حتى لو أُخفي المسار بنقاط مشفّرة أو شرطات مكررة ----
     @Test
     public void adminAreaIsRecognisedEvenWhenDisguised() {
         // These are the pages that must be hidden from screenshots.
@@ -89,6 +99,7 @@ public class NavigationPolicyTest {
         assertFalse(policy.isAdminArea(null));
     }
 
+    // ---- التنزيل مسموح من واجهة الإدارة على أصلنا فقط ----
     @Test
     public void downloadsAreOnlyAllowedFromTheAdminApiOfOurOrigin() {
         assertTrue(policy.isDownloadAllowed(ORIGIN + "/api/admin/export/orders.csv"));
@@ -100,6 +111,7 @@ public class NavigationPolicyTest {
         assertFalse(policy.isDownloadAllowed("javascript:alert(1)"));
     }
 
+    // ---- اختبار دالة تنظيف المسار مباشرة ----
     @Test
     public void cleanPathResolvesDotSegments() {
         assertEquals("/", NavigationPolicy.cleanPath(null));

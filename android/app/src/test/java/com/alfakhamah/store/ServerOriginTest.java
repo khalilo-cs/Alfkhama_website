@@ -1,3 +1,5 @@
+// ملف ServerOriginTest.java: اختبارات JUnit للتحقق من عنوان الخادم (ServerOrigin).
+// تغطي التوحيد (حروف صغيرة، حذف المنفذ الافتراضي)، ورفض http في نسخة الإصدار، وحدود http المحلي في الاختبار.
 package com.alfakhamah.store;
 
 import static org.junit.Assert.assertEquals;
@@ -9,6 +11,7 @@ import org.junit.Test;
 
 public class ServerOriginTest {
 
+    // دالة مساعدة: تتأكد أن العنوان يُرفض بالسبب المحدد بالضبط.
     private static void rejects(String raw, boolean allowLocal, ServerOrigin.Reason expected) {
         try {
             String value = ServerOrigin.normalize(raw, allowLocal);
@@ -18,6 +21,7 @@ public class ServerOriginTest {
         }
     }
 
+    // ---- عناوين https المقبولة وطريقة توحيدها ----
     @Test
     public void acceptsAndNormalisesHttpsOrigins() throws Exception {
         assertEquals("https://shop.example.com", ServerOrigin.normalize("https://shop.example.com", false));
@@ -27,6 +31,7 @@ public class ServerOriginTest {
         assertEquals("https://shop.example.com", ServerOrigin.normalize("shop.example.com", false)); // scheme defaults to https
     }
 
+    // ---- مدخلات فارغة أو تالفة ----
     @Test
     public void emptyAndMalformedInputIsRejected() {
         rejects(null, false, ServerOrigin.Reason.EMPTY);
@@ -36,6 +41,7 @@ public class ServerOriginTest {
         rejects("https:///path", false, ServerOrigin.Reason.MALFORMED);
     }
 
+    // ---- نسخة الإصدار (allowLocal=false) لا تقبل غير https أبدًا ----
     @Test
     public void releaseBuildsNeverAcceptCleartext() {
         rejects("http://shop.example.com", false, ServerOrigin.Reason.NOT_HTTPS);
@@ -45,6 +51,7 @@ public class ServerOriginTest {
         rejects("javascript://shop.example.com", true, ServerOrigin.Reason.NOT_HTTPS);
     }
 
+    // ---- نسخة الاختبار: http للعناوين المحلية فقط، وأي نطاق عام أو يشبه المحلي يُرفض ----
     @Test
     public void testBuildsAllowCleartextOnlyForLocalHosts() throws Exception {
         assertEquals("http://10.0.2.2:4173", ServerOrigin.normalize("http://10.0.2.2:4173", true));
@@ -60,6 +67,7 @@ public class ServerOriginTest {
         rejects("http://10.0.2.2.evil.com", true, ServerOrigin.Reason.NOT_HTTPS);
     }
 
+    // ---- رفض المسار والاستعلام والجزء وبيانات الدخول ----
     @Test
     public void pathsQueriesAndCredentialsAreRejected() {
         rejects("https://shop.example.com/admin", false, ServerOrigin.Reason.HAS_PATH);
@@ -68,6 +76,7 @@ public class ServerOriginTest {
         rejects("https://admin:secret@shop.example.com", false, ServerOrigin.Reason.CREDENTIALS);
     }
 
+    // ---- اختبار isLocalHost مباشرة، بما فيه حدود النطاق 172.16-31 ----
     @Test
     public void localHostDetection() {
         assertTrue(ServerOrigin.isLocalHost("localhost"));
@@ -81,6 +90,7 @@ public class ServerOriginTest {
         assertFalse(ServerOrigin.isLocalHost("localhost.example.com"));
     }
 
+    // يضمن أن العنوان المقترح في أول تشغيل لنسخة الاختبار يمر من التحقق بصيغة https.
     @org.junit.Test
     public void suggestedFirstRunOriginIsAValidHttpsOrigin() throws Exception {
         assertEquals("https://alfakhama.onrender.com", ServerOrigin.normalize(MainActivity.SUGGESTED_ORIGIN, false));

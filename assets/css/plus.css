@@ -1,7 +1,11 @@
+/* شرح بالعربية: ملف التنسيقات المصاحب لـ assets/js/plus.js، يُحمَّل بعد تنسيقات الصفحة الداخلية فيتغلب عليها. */
+/* المتغيرات مثل var(--gold) وvar(--night) وvar(--ease) معرّفة في تنسيقات index.html (هوية "ليلي وذهبي"). */
+/* يُحفظ مسبقًا في كاش sw.js. التصميم يدعم الاتجاه من اليمين لليسار (RTL) وشاشات بعرض 390px. */
 /* Storefront enhancement layer — night & gold identity, RTL, 390px-safe.
    Loaded after the page's inline styles; every rule is progressive: without the script the page looks as before. */
 
 /* ---- images: skeleton shimmer while loading, fade in when decoded, blur-up placeholder in galleries ---- */
+/* حركة لمعان تمر على الهيكل الرمادي (skeleton) ريثما تُحمَّل الصور والبطاقات. */
 @keyframes plus-shimmer{from{background-position:130% 0}to{background-position:-130% 0}}
 .skel,.skel-line{background:linear-gradient(100deg,#e9e0cf 30%,#f6efe0 48%,#e9e0cf 66%);background-size:260% 100%;animation:plus-shimmer 1.6s linear infinite}
 .skel-line{height:14px;border-radius:8px;margin:0 0 10px}
@@ -10,29 +14,37 @@
 .product-card.skeleton .product-image-wrap:after{display:none}
 .category-card.skeleton{background:linear-gradient(100deg,#e9e0cf 30%,#f6efe0 48%,#e9e0cf 66%);background-size:260% 100%;animation:plus-shimmer 1.6s linear infinite;pointer-events:none}
 .category-card.skeleton:after,.category-card.skeleton:before{display:none}
+/* الصورة تبدأ شفافة وتظهر تدريجيًا عندما يضيف السكربت الفئة is-loaded بعد اكتمال التحميل. */
 img.fade-img{opacity:0;transition:opacity .5s var(--ease)}
 img.fade-img.is-loaded{opacity:1}
 .product-image-wrap{background:linear-gradient(100deg,#e9e0cf 30%,#f6efe0 48%,#e9e0cf 66%) 0 0/260% 100%}
 .modal-image,.product-gallery-main{position:relative;overflow:hidden}
+/* خلفية مموهة من الصورة نفسها (المتغير --ph) تظهر خلف الصورة الحقيقية أثناء تحميلها (blur-up). */
 .modal-image:before,.product-gallery-main:before{content:"";position:absolute;inset:-12px;background:var(--ph,none) center/cover no-repeat;filter:blur(14px) saturate(1.1);transform:scale(1.05);z-index:0}
 .modal-image img,.product-gallery-main img{position:relative;z-index:1;transition:opacity .45s var(--ease),transform .45s var(--ease)}
 .modal-image img.is-swapping,.product-gallery-main img.is-swapping{opacity:.25}
 .product-gallery-main:after{z-index:3}
 
 /* ---- gallery: arrows, counter, zoom, swipe ---- */
+/* touch-action يسمح بالتمرير العمودي وتكبير القرص، ويترك السحب الأفقي لسكربت تبديل الصور. */
 .zoomable{touch-action:pan-y pinch-zoom;cursor:zoom-in;-webkit-user-select:none;user-select:none}
 .zoomable.is-zoomed{cursor:zoom-out;touch-action:none}
 .zoomable img{-webkit-user-drag:none}
+/* عند التكبير تتكبر الصورة 2.4 مرة حول نقطة (--zx, --zy) التي يحددها السكربت حسب مكان المؤشر. */
 .zoomable.is-zoomed img{transform:scale(2.4);transition:transform .35s var(--ease)}
 .zoomable img{transform-origin:var(--zx,50%) var(--zy,50%)}
+/* أزرار الأسهم والتكبير: دوائر 44px (حجم مناسب للمس) فوق الصورة بخلفية داكنة شفافة. */
 .gnav,.gzoom{position:absolute;z-index:4;width:44px;height:44px;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(21,19,15,.72);color:var(--gold-2);backdrop-filter:blur(8px);box-shadow:inset 0 0 0 1px rgba(234,214,166,.35);transition:background .3s,color .3s,transform .4s var(--spring)}
 .gnav:hover,.gzoom:hover{background:var(--gold-grad);color:var(--night);transform:scale(1.06)}
 .gnav svg,.gzoom svg{width:20px;height:20px}
 .gnav{top:50%;margin-top:-22px}
+/* في RTL يكون "التالي" على اليسار و"السابق" على اليمين. */
 .gnav-next{left:12px}.gnav-prev{right:12px}
 .gzoom{bottom:12px;left:12px}
 .gzoom[aria-pressed="true"]{background:var(--gold-grad);color:var(--night)}
+/* عداد الصور مثل "1 من 5" أسفل يمين المعرض. */
 .gcount{position:absolute;z-index:4;bottom:16px;right:16px;min-width:54px;text-align:center;padding:5px 12px;border-radius:999px;background:rgba(21,19,15,.78);color:var(--gold-2);font-size:13px;font-weight:700;box-shadow:inset 0 0 0 1px rgba(234,214,166,.3)}
+/* حلقة تركيز داخلية لأن الصورة تتلقى التركيز بلوحة المفاتيح. */
 .modal-image:focus-visible,.product-gallery-main:focus-visible{outline:3px solid var(--gold-ink);outline-offset:-3px}
 
 /* ---- quick view details ---- */
@@ -49,14 +61,17 @@ img.fade-img.is-loaded{opacity:1}
 /* ---- search: instant suggestions ---- */
 mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 @media (min-width:1001px){.header-search{position:relative}}
+/* قائمة الاقتراحات تظهر تحت الحقل مباشرة (position:absolute) وتتمرر داخليًا إن طالت (max-height). */
 .search-suggest{position:absolute;top:calc(100% + 8px);inset-inline:0;min-width:min(360px,100vw - 36px);z-index:60;background:var(--white);border:1px solid rgba(201,164,100,.45);border-radius:20px;box-shadow:var(--shadow);padding:8px;max-height:min(70vh,440px);overflow:auto;overscroll-behavior:contain}
 .search-suggest[hidden]{display:none}
+/* كل اقتراح: صورة مصغرة 52px بجانب الاسم والقسم والسعر، وارتفاع أدنى 60px للمس. */
 .suggest-item{display:grid;grid-template-columns:52px minmax(0,1fr);align-items:center;gap:12px;padding:8px;border-radius:14px;color:var(--ink);cursor:pointer;min-height:60px}
 .suggest-item img{width:52px;height:52px;border-radius:12px;object-fit:cover;background:var(--sand)}
 .suggest-item b{display:block;font-size:14px;line-height:1.5;font-weight:700}
 .suggest-item small{display:block;font-size:12.5px;color:var(--muted)}
 .suggest-item .suggest-price{font-size:13px;font-weight:800;color:var(--gold-ink)}
 .suggest-item .on-request{font-size:13px;color:var(--gold-ink)}
+/* تمييز الخيار المحدد بالأسهم أو بالفأرة بإطار ذهبي. */
 .suggest-item[aria-selected="true"],.suggest-item:hover{background:#f6edda;box-shadow:inset 0 0 0 2px var(--gold)}
 .suggest-all{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 10px;margin-top:4px;border-top:1px solid var(--line);font-size:13.5px;font-weight:700;color:var(--gold-ink);cursor:pointer;border-radius:12px;min-height:44px}
 .suggest-all[aria-selected="true"],.suggest-all:hover{background:#f6edda}
@@ -67,12 +82,14 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 .toggle-chip{display:inline-flex;align-items:center;gap:9px;min-height:44px;padding:0 16px;border:1px solid #d9cbb2;border-radius:999px;background:rgba(255,253,248,.6);font-size:13px;color:#3f3a31;cursor:pointer;transition:border-color .3s,background .3s}
 .toggle-chip:hover{border-color:var(--gold);background:var(--white)}
 .toggle-chip input{width:20px;height:20px;margin:0;accent-color:var(--gold-3)}
+/* selector :has() يغيّر شكل الشريحة عندما يكون مربع الاختيار بداخلها مفعّلًا (متصفحات حديثة). */
 .toggle-chip:has(input:checked){background:var(--night);border-color:var(--night);color:var(--gold-2)}
 .toggle-chip:has(input:focus-visible){outline:3px solid var(--gold-ink);outline-offset:3px}
 .clear-filters{min-height:44px;padding:0 14px;border:0;background:none;color:var(--gold-ink);font-size:13px;font-weight:700;text-decoration:underline;text-underline-offset:5px}
 .filter-extras{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
 /* ---- cart drawer ---- */
+/* سطر المنتج في سلة المشتريات: صورة وبيانات وإجمالي السطر. */
 .cart-line{grid-template-columns:76px minmax(0,1fr) auto;align-items:start}
 .cart-line img{width:76px;height:84px}
 .cart-line h3 a{color:inherit}
@@ -84,6 +101,7 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 .qty-control button[aria-disabled="true"]{opacity:.4;cursor:not-allowed}
 .qty-control button{width:34px;height:34px;font-size:18px;line-height:1}
 .stock-hint{margin:4px 0 0;font-size:12.5px;color:#8a4a1f;font-weight:700}
+/* شريط "تراجع" الذي يظهر بعد حذف منتج من السلة. */
 .undo-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 10px;padding:10px 14px;border-radius:14px;background:var(--night);color:var(--ivory);font-size:13.5px}
 .undo-bar button{border:0;background:none;color:var(--gold-2);font-weight:800;text-decoration:underline;text-underline-offset:4px;min-height:44px;padding:0 6px}
 .subtotal-row.sub-fee{font-size:13px;font-weight:500;color:var(--muted);margin-top:5px}
@@ -94,6 +112,7 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 /* ---- order flow ---- */
 .order-intro{margin:0 0 16px;color:var(--muted);font-size:14.5px;line-height:1.9}
 .order-modal{width:min(560px,100%)}
+/* مؤشر خطوات الطلب (1-2-3): الخطوة الحالية داكنة، والمكتملة ذهبية، والخط بين الخطوات من li+li:before. */
 .order-steps{list-style:none;display:flex;margin:0 0 18px;padding:0 0 0 50px;gap:6px;counter-reset:step}
 .order-steps li{flex:1 1 0;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);font-weight:600;min-width:0}
 .order-steps li span{flex:0 0 28px;height:28px;border-radius:50%;display:grid;place-items:center;border:1px solid #cdbd9f;font-size:13px;font-family:var(--display)}
@@ -108,6 +127,7 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 .order-summary li span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .order-summary .sum-total{display:flex;justify-content:space-between;gap:10px;border-top:1px dashed #d9cbb2;padding-top:8px;font-weight:800}
 .order-summary .sum-note{margin:6px 0 0;font-size:13px;color:#5a4116;line-height:1.7}
+/* رسائل الأخطاء: تنبيه عام أعلى النموذج، وخطأ لكل حقل مع علامة "!" وإطار أحمر للحقل غير الصالح. */
 .form-alert{margin:0 0 14px;padding:12px 14px;border-radius:14px;background:#fdecea;border:1px solid #e3a59d;color:#7d2a20;font-size:14px;font-weight:700;line-height:1.7}
 .form-alert[hidden]{display:none}
 .form-alert:focus{outline:3px solid #7d2a20;outline-offset:2px}
@@ -118,9 +138,11 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 .form-field input[aria-invalid="true"],.form-field textarea[aria-invalid="true"]{border-color:#9a3b2f;box-shadow:0 0 0 3px rgba(154,59,47,.14)}
 .consent input[aria-invalid="true"]{outline:2px solid #9a3b2f;outline-offset:2px}
 .consent-error{margin:-8px 0 12px}
+/* أثناء إرسال الطلب يتعطل الزر ويظهر مؤشر دوران (spin-b) عبر aria-busy. */
 .order-modal .btn[disabled]{opacity:.65;cursor:progress;transform:none}
 .order-modal .btn[aria-busy="true"]:after{content:"";width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-inline-end-color:transparent;animation:spin-b .7s linear infinite}
 @keyframes spin-b{to{transform:rotate(360deg)}}
+/* شاشة نجاح الطلب: علامة صح ذهبية ورقم الطلب وزر النسخ. */
 .order-done{text-align:center;padding:6px 0 2px}
 .order-done .done-mark{width:68px;height:68px;margin:0 auto 14px;border-radius:50%;display:grid;place-items:center;background:var(--gold-grad);color:var(--night);box-shadow:0 16px 34px -12px rgba(178,134,66,.8)}
 .order-done .done-mark svg{width:34px;height:34px}
@@ -131,6 +153,7 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 
 /* ---- recently viewed ---- */
 .recent-section{padding:64px 0}
+/* شريط أفقي قابل للتمرير (scroll-snap) يوقف كل بطاقة عند بدايتها. */
 .recent-strip{list-style:none;margin:0;padding:6px 2px 14px;display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:thin}
 .recent-item{flex:0 0 clamp(150px,22vw,210px);scroll-snap-align:start}
 .recent-item a{display:block;border-radius:20px;background:var(--white);padding:8px;box-shadow:var(--shadow-soft);color:var(--ink);transition:transform .4s var(--ease),box-shadow .4s var(--ease);height:100%}
@@ -142,7 +165,10 @@ mark{background:#f3dcaa;color:var(--night);border-radius:4px;padding:0 2px}
 .section-head .text-btn{align-self:flex-end}
 
 /* ---- install-the-app card, connection notice ---- */
+/* بطاقة "ثبّت التطبيق": ثابتة أسفل الشاشة (position:fixed) فوق باقي العناصر، وعلى الشاشات العريضة تنتقل */
+/* لزاوية. */
 .install-card{position:fixed;z-index:44;inset-inline:14px;bottom:14px;max-width:460px;margin-inline:auto;display:grid;grid-template-columns:48px minmax(0,1fr);gap:4px 14px;align-items:center;padding:16px 18px;border-radius:24px;background:linear-gradient(180deg,#1e1a15,#15130f);color:var(--ivory);border:1px solid rgba(234,214,166,.4);box-shadow:0 30px 70px -20px rgba(0,0,0,.7)}
+/* ترتفع البطاقة فوق لافتة الموافقة على الكوكيز عندما تكون ظاهرة (الارتفاع --consent-h). */
 html.has-consent .install-card{bottom:calc(var(--consent-h,0px) + 14px)}
 .install-card[hidden]{display:none}
 .install-card .ic-mark{grid-row:span 2;width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--gold-grad);color:var(--night)}
@@ -153,19 +179,23 @@ html.has-consent .install-card{bottom:calc(var(--consent-h,0px) + 14px)}
 .install-card .btn{flex:1 1 0;min-height:46px;padding:10px 16px;font-size:14px}
 .install-card .btn-outline{color:var(--ivory);border-color:rgba(234,214,166,.5);background:transparent}
 .install-card :focus-visible{outline-color:var(--gold-2);box-shadow:0 0 0 6px rgba(21,19,15,.6)}
+/* الحركة تُفعَّل فقط لمن لم يطلب تقليل الحركة في نظامه (إمكانية وصول). */
 @media (prefers-reduced-motion:no-preference){.install-card:not([hidden]){animation:consent-in .5s var(--ease) both}}
 @media (min-width:700px){.install-card{inset-inline:auto 20px;margin:0}}
 .site-footer .install-link{cursor:pointer}
 
 /* ---- hero: real image (early discovery, fetchpriority), shortcut chips, gentle parallax ---- */
 .hero:before{content:none}
+/* صورة الواجهة الرئيسية كعنصر img حقيقي (يُكتشف مبكرًا ويُحمَّل بأولوية) مع حركة تكبير بطيئة kenburns. */
 .hero-bg{position:absolute;inset:-3%;width:106%;height:106%;max-width:none;object-fit:cover;z-index:-2;transform-origin:30% 45%;animation:kenburns 28s ease-in-out infinite alternate}
 .hero-chips{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 0;padding:0;min-height:46px}
 .hero-chips a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid rgba(234,214,166,.4);background:rgba(253,250,244,.07);color:var(--ivory);font-size:14px;backdrop-filter:blur(8px);transition:background .3s,border-color .3s,transform .4s var(--spring)}
 .hero-chips a:hover{background:rgba(253,250,244,.16);border-color:var(--gold-2);transform:translateY(-2px)}
+/* حركات الواجهة: ظهور شرائح الأقسام تدريجيًا، وتحريك الصورة مع التمرير (parallax) حيث يدعمه المتصفح. */
 @media (prefers-reduced-motion:no-preference){
   .hero-chips li{animation:rise .7s var(--ease) both}
   .hero-chips li:nth-child(2){animation-delay:.07s}.hero-chips li:nth-child(3){animation-delay:.14s}.hero-chips li:nth-child(4){animation-delay:.21s}.hero-chips li:nth-child(5){animation-delay:.28s}
+  /* animation-timeline:scroll() ميزة حديثة؛ المتصفحات التي لا تدعمها تتجاهل هذا الجزء كله. */
   @supports (animation-timeline:scroll()){
     .hero-bg{translate:0 0;animation:kenburns 28s ease-in-out infinite alternate,hero-parallax linear both;animation-timeline:auto,scroll(root);animation-range:normal,0 70vh}
     @keyframes hero-parallax{to{translate:0 9%}}
@@ -173,12 +203,16 @@ html.has-consent .install-card{bottom:calc(var(--consent-h,0px) + 14px)}
   .reveal-on .section-head .eyebrow:before{transform-origin:100% 50%;transform:scaleX(0);transition:transform .9s var(--ease) .2s}
   .reveal-on .section-head.in .eyebrow:before{transform:scaleX(1)}
 }
+/* إيقاف الحركات كليًا لمن يفضّل تقليل الحركة. */
 @media (prefers-reduced-motion:reduce){.hero-bg{animation:none}.skel,.skel-line,.category-card.skeleton{animation:none}}
 
 /* ---- below-the-fold sections: skip rendering work until they are near the screen ---- */
+/* content-visibility:auto يؤجل رسم الأقسام البعيدة عن الشاشة لتسريع التحميل؛ contain-intrinsic-size يقدّر */
+/* ارتفاعها. */
 @supports (content-visibility:auto){
   .services,.guide-section,#faq,.recent-section{content-visibility:auto;contain-intrinsic-size:auto 620px}
 }
+/* تعديلات الهاتف: أزرار وبطاقات أصغر قليلًا ومسافات أقل. */
 @media (max-width:600px){
   .gnav{width:40px;height:40px;margin-top:-20px}.gnav-next{left:8px}.gnav-prev{right:8px}
   .gzoom{width:40px;height:40px;bottom:8px;left:8px}
@@ -186,6 +220,7 @@ html.has-consent .install-card{bottom:calc(var(--consent-h,0px) + 14px)}
   .recent-section{padding:44px 0}
   .install-card{padding:14px}
 }
+/* عند الطباعة تُخفى العناصر التفاعلية غير اللازمة. */
 @media print{.install-card,.search-suggest,.gnav,.gzoom,.gcount,.recent-section{display:none!important}}
 .no-results span{display:block}
 .no-results .btn{display:inline-flex;margin-top:14px}

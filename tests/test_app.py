@@ -3,6 +3,14 @@
 Each test class starts its own server process on a free port with a throw-away DATA_DIR, so nothing
 touches a real store.db / uploads folder and the in-memory rate limiters never leak between classes.
 """
+# ====================================================================================================
+# ملف اختبارات الخادم (tests/test_app.py): اختبارات "الصندوق الأسود" لتطبيق app.py.
+# كل صنف اختبار يشغّل app.py كعملية مستقلة على منفذ حر وبمجلد بيانات مؤقت، ثم يرسل طلبات HTTP حقيقية إليه
+# ويتحقق من الردود. لذلك لا يلمس أي قاعدة بيانات حقيقية، ولا تتسرب حدود المعدل (rate limits) بين الأصناف.
+# يغطي: الصفحات العامة والملفات الثابتة، لوحة الإدارة وتسجيل الدخول وCSRF، الطلبات والمخزون، رسائل التواصل،
+# صفحات SEO والبيانات المنظمة، الإحصاءات، إعدادات Google، النسخ الاحتياطي والاستعادة.
+# التشغيل:  python3 -I -m unittest discover -s tests
+# ====================================================================================================
 from __future__ import annotations
 
 import base64
@@ -21,6 +29,8 @@ import time
 import unittest
 from pathlib import Path
 
+# ---- ثوابت عامة ----
+# ROOT هو مجلد المشروع (أعلى من tests). ENV_FILE=off يمنع قراءة ملف .env محلي حتى لا تتأثر الاختبارات به.
 ROOT = Path(__file__).resolve().parent.parent
 os.environ["ENV_FILE"] = "off"  # a developer's local .env must never leak into test servers
 
@@ -30,21 +40,29 @@ JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 WEBP = b"RIFF" + b"\x24\x00\x00\x00" + b"WEBP" + b"VP8 " + b"\x00" * 32
 
 
+# يطلب من النظام منفذًا غير مستخدم (bind إلى المنفذ 0) لتشغيل خادم الاختبار عليه دون تعارض.
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
+# يبني صورة بصيغة data URI (base64) كما ترسلها لوحة الإدارة عند رفع صورة منتج.
 def data_uri(mime: str, raw: bytes) -> str:
     return f"data:{mime};base64," + base64.b64encode(raw).decode()
 
 
+# ---- الصنف الأساسي لكل اختبارات الخادم ----
+# يشغّل app.py كعملية فرعية في setUpClass ويوقفها في tearDownClass، ويوفر دوال مساعدة للطلبات وتسجيل الدخول.
+# الأصناف الأخرى ترث منه، وتستطيع تعديل ENV لإضافة متغيرات بيئة (مثل رفع حدود المعدل).
 class ServerCase(unittest.TestCase):
     """Starts app.py as a subprocess. Subclasses may override ENV."""
     ENV: dict[str, str] = {}
     admin_password: str | None = None
 
+    # تشغيل الخادم: نزيل ADMIN_PASSWORD وTRUST_PROXY وغيرها من بيئة المطوّر حتى لا تؤثر، ونشغّل بالخيار -I
+    # (وضع معزول لا يقرأ متغيرات بايثون ولا المجلد الحالي). ثم ننتظر حتى 20 ثانية إلى أن يقبل المنفذ
+    # اتصالات.
     @classmethod
     def start_server(cls, data_dir: str | None = None, env: dict | None = None):
         cls.port = free_port()
@@ -65,6 +83,8 @@ class ServerCase(unittest.TestCase):
                 time.sleep(0.1)
         raise RuntimeError("server did not start")
 
+    # إيقاف الخادم: terminate أولًا ثم kill إن لم ينتهِ خلال 5 ثوانٍ، ثم حذف مجلد البيانات المؤقت
+    # (اختياريًا).
     @classmethod
     def stop_server(cls, remove_data: bool = True):
         cls.proc.terminate()
@@ -76,6 +96,8 @@ class ServerCase(unittest.TestCase):
         if remove_data:
             shutil.rmtree(cls.data_dir, ignore_errors=True)
 
+    # كلمة مرور المدير تُولَّد عشوائيًا لكل صنف وتُمرَّر عبر متغير البيئة فقط؛ لا توجد كلمة مرور ثابتة في
+    # الاختبارات.
     @classmethod
     def setUpClass(cls):
         cls.admin_password = "T" + secrets.token_urlsafe(18)
@@ -86,6 +108,9 @@ class ServerCase(unittest.TestCase):
         cls.stop_server()
 
     # -- helpers -----------------------------------------------------------------
+    # طلب HTTP خام: المسار يُرسل كما هو بلا تطبيع (مهم لاختبار مسارات مثل ../ ). يعيد (الحالة، الاستجابة،
+    # الجسم).
+    # الجسم من نوع dict يُحوَّل إلى JSON، والكوكي ورمز CSRF يُضافان كترويسات عند تمريرهما.
     def req(self, method: str, path: str, body=None, headers: dict | None = None, cookie: str | None = None, csrf: str | None = None):
         """Raw request: the path is sent exactly as given (no client-side '..' normalisation)."""
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
@@ -104,6 +129,8 @@ class ServerCase(unittest.TestCase):
         conn.close()
         return resp.status, resp, data
 
+    # نفس req لكن يفك JSON من الرد؛ إن لم يكن الرد JSON صالحًا يعيد {"_raw": ...} بدل أن يفشل الاختبار بخطأ
+    # تحليل.
     def json(self, method, path, body=None, **kw):
         status, resp, data = self.req(method, path, body, **kw)
         try:
@@ -112,6 +139,7 @@ class ServerCase(unittest.TestCase):
             parsed = {"_raw": data[:200]}
         return status, parsed, resp
 
+    # يسجّل دخول المدير ويعيد (كوكي الجلسة، رمز CSRF) لاستخدامهما في الطلبات المحمية.
     def login(self, password: str | None = None, username: str = "admin"):
         status, data, resp = self.json("POST", "/api/admin/login", {"username": username, "password": password or self.admin_password})
         self.assertEqual(status, 200, data)
@@ -119,6 +147,7 @@ class ServerCase(unittest.TestCase):
         return cookie, data["csrf"]
 
 
+# ---- الواجهات العامة والملفات الثابتة والترويسات الأمنية وملفات PWA وrobots/sitemap ----
 class PublicAndStaticTests(ServerCase):
     def test_health_store_categories_products(self):
         self.assertEqual(self.json("GET", "/api/health")[0], 200)
@@ -148,6 +177,8 @@ class PublicAndStaticTests(ServerCase):
         self.assertIn(b'href="/admin/"', body, "storefront footer links to the admin login (same app, same database)")
         self.assertEqual(self.req("HEAD", "/")[0], 200)
 
+    # أمني: محاولات الخروج من مجلدات assets/uploads (../ والترميز %2e و\ وبايت NUL) يجب أن تعطي 404
+    # ولا تكشف store.db أو app.py (كانت النسخة الأولى تقدمهما).
     def test_path_traversal_is_blocked(self):
         # The original build served store.db / app.py for these.
         attacks = [
@@ -162,10 +193,13 @@ class PublicAndStaticTests(ServerCase):
             self.assertNotIn(b"SQLite format", body, path)
             self.assertNotIn(b"hash_password", body, path)
 
+    # أمني: ملفات المشروع الداخلية (الشيفرة والقاعدة وملفات git وenv) ليست ضمن الملفات العامة.
     def test_non_public_files_are_not_served(self):
         for path in ("/app.py", "/store.db", "/DATABASE.md", "/README.md", "/tests/test_app.py", "/.git/config", "/.env", "/android/build.gradle"):
             self.assertEqual(self.req("GET", path)[0], 404, path)
 
+    # ترويسات الحماية: nosniff ومنع التضمين في إطار وCSP، وعدم كشف نوع الخادم، وHSTS لا يظهر على HTTP
+    # العادي.
     def test_security_headers(self):
         _, resp, _ = self.req("GET", "/")
         self.assertEqual(resp.getheader("X-Content-Type-Options"), "nosniff")
@@ -198,6 +232,7 @@ class PublicAndStaticTests(ServerCase):
         self.assertEqual(resp.getheader("Service-Worker-Allowed"), "/")
         self.assertEqual(self.req("GET", "/offline.html")[0], 200)
 
+    # يتأكد من نص sw.js أنه يستثني /api/ و/admin ولا يخزّن إلا طلبات GET، حتى لا يُخزَّن شيء خاص مؤقتًا.
     def test_service_worker_never_touches_api_admin_or_writes(self):
         _, _, body = self.req("GET", "/sw.js")
         src = body.decode()
@@ -206,6 +241,8 @@ class PublicAndStaticTests(ServerCase):
         self.assertRegex(src, r"request\.method\s*!==\s*['\"]GET['\"]")
         self.assertNotIn("localStorage", src)
 
+    # robots/sitemap يتبعان إعداد site_ready: قبل اعتماد المتجر يُمنع الفهرس (404 لـ sitemap)، وبعده يُسمح.
+    # ويُتحقق أيضًا أن ترويسة Host الخبيثة لا تنعكس داخل الملفات.
     def test_robots_and_sitemap_follow_site_ready(self):
         _, _, robots = self.req("GET", "/robots.txt")
         self.assertIn(b"Disallow: /\n", robots)
@@ -227,13 +264,17 @@ class PublicAndStaticTests(ServerCase):
             self.json("PUT", "/api/admin/settings", {"site_ready": False}, cookie=cookie, csrf=csrf)
 
 
+# ---- لوحة الإدارة: تسجيل الدخول والجلسة وCSRF والمنتجات والأقسام والإعدادات وتغيير كلمة المرور ----
 class AdminTests(ServerCase):
+    # كل واجهات /api/admin/* ترفض الزائر غير المسجّل بحالة 401.
     def test_admin_endpoints_require_login(self):
         for path in ("/api/admin/me", "/api/admin/dashboard", "/api/admin/products", "/api/admin/categories",
                      "/api/admin/orders", "/api/admin/settings", "/api/admin/export/orders.csv", "/api/admin/messages"):
             self.assertEqual(self.req("GET", path)[0], 401, path)
         self.assertEqual(self.json("POST", "/api/admin/products", {"name": "x"})[0], 401)
 
+    # نقطة /api/admin/session تعيد 200 دائمًا؛ للزائر غير المسجل تعيد authenticated=False فقط دون أي بيانات
+    # خاصة.
     def test_session_status_probe_is_200_without_private_data(self):
         status, anon, resp = self.json("GET", "/api/admin/session")
         self.assertEqual((status, anon), (200, {"authenticated": False}), "anonymous probe leaks nothing")
@@ -245,6 +286,8 @@ class AdminTests(ServerCase):
         self.assertEqual((status, me["authenticated"], me["username"], me["csrf"]), (200, True, "admin", data["csrf"]))
         self.assertEqual(self.json("GET", "/api/admin/session", cookie="session=bogus")[1], {"authenticated": False})
 
+    # كوكي الجلسة HttpOnly وSameSite=Lax (و Secure فقط خلف HTTPS). أي كتابة بلا رمز CSRF صحيح تُرفض بـ 403،
+    # وتسجيل الخروج يبطل الجلسة.
     def test_login_cookie_flags_and_csrf(self):
         status, data, _ = self.json("POST", "/api/admin/login", {"username": "admin", "password": "wrong-password-123"})
         self.assertEqual(status, 401)
@@ -264,6 +307,10 @@ class AdminTests(ServerCase):
         self.assertEqual(self.json("POST", "/api/admin/logout", {}, cookie=cookie, csrf=data["csrf"])[0], 200)
         self.assertEqual(self.req("GET", "/api/admin/me", cookie=cookie)[0], 401)
 
+    # دورة المنتج الكاملة. الأهم أمنيًا: الصورة تُقبل فقط إن طابقت بايتاتها الأولى (magic bytes) نوعها
+    # المعلن
+    # (png/jpeg/webp)، وتُرفض GIF وSVG وbase64 التالف والحجم الكبير؛ وتُحفظ بأسماء عشوائية داخل /uploads/.
+    # ومسار صورة خارج assets/uploads يُتجاهل ولا يُخزَّن.
     def test_product_crud_with_image_upload_and_validation(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -323,6 +370,7 @@ class AdminTests(ServerCase):
             self.assertEqual(self.json("DELETE", f"/api/admin/products/{p['id']}", **kw)[0], 200)
         self.assertEqual(self.json("DELETE", f"/api/admin/products/{created[0]['id']}", **kw)[0], 404)
 
+    # السعر 0 يعني "حسب الطلب": الخادم يجمع المنتجات المسعّرة فقط ويضع علامة on_request على الطلب.
     def test_price_zero_means_price_on_request(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -347,6 +395,7 @@ class AdminTests(ServerCase):
         self.json("DELETE", f"/api/admin/products/{pid}", **kw)
         self.json("DELETE", f"/api/admin/products/{priced['id']}", **kw)
 
+    # إنشاء القسم وتكراره (409) وإخفاؤه من الواجهة العامة؛ ولا يمكن حذف قسم يحتوي منتجات (409).
     def test_category_lifecycle(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -369,6 +418,8 @@ class AdminTests(ServerCase):
         self.assertEqual(self.json("DELETE", url, **kw)[0], 200)
         self.assertEqual(self.json("DELETE", url, **kw)[0], 404)
 
+    # روابط الخريطة وانستغرام يجب أن تكون http/https فقط (تُرفض javascript: وdata:)، ورسوم التوصيل رقم غير
+    # سالب.
     def test_settings_validation_and_persistence(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -386,6 +437,8 @@ class AdminTests(ServerCase):
         self.assertEqual(store["phone"], "+966 57 648 6491")
         self.json("PUT", "/api/admin/settings", {"delivery_fee": 0}, **kw)
 
+    # تغيير كلمة المرور: قصيرة = 400، كلمة حالية خاطئة = 403، وبعد النجاح تبقى الجلسة الحالية وتُلغى بقية
+    # الجلسات.
     def test_password_change(self):
         cookie, csrf = self.login()
         other_cookie, _ = self.login()  # a second session that must die when the password changes
@@ -402,6 +455,7 @@ class AdminTests(ServerCase):
         self.assertEqual(self.json("POST", "/api/admin/password", {"current_password": new, "new_password": self.admin_password}, cookie=cookie2, csrf=csrf2)[0], 200)
 
 
+# ---- الطلبات: التسعير من الخادم، المخزون، الإلغاء، التحقق من المدخلات ----
 class OrderTests(ServerCase):
     ENV = {"ORDER_LIMIT_PER_10MIN": "1000"}  # these tests place many orders; the limiter has its own test below
 
@@ -416,10 +470,14 @@ class OrderTests(ServerCase):
     def stock_of(self, product_id):
         return next(p["stock"] for p in self.json("GET", "/api/products")[1]["products"] if p["id"] == product_id)
 
+    # يرسل طلبًا عامًا بحقول افتراضية صحيحة؛ يمكن تمرير حقول لتغيير أي منها.
     def order(self, items, **fields):
         body = {"name": "عميل اختبار", "phone": "0551234567", "city": "جدة", "consent": True, "note": "ملاحظة", "items": items, **fields}
         return self.json("POST", "/api/orders", body)
 
+    # الخادم يتجاهل السعر والمجموع المرسلين من العميل ويحسبهما من قاعدة البيانات؛ الطلب ينقص المخزون،
+    # والإلغاء يعيده وإعادة التفعيل تأخذه ثانية. ثم يفحص لوحة المؤشرات وتصدير CSV (يبدأ بـ BOM ليفتحه Excel
+    # بالعربية).
     def test_order_flow_totals_stock_and_cancel(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -450,6 +508,8 @@ class OrderTests(ServerCase):
         self.assertIn(data["order_number"].encode(), body)
         self.json("PUT", "/api/admin/settings", {"delivery_fee": 0}, **kw)
 
+    # المدخلات الخاطئة (كمية خارج 1..50، منتج غير موجود، JSON تالف، بيانات عميل ناقصة) ترفض ولا تغيّر
+    # المخزون.
     def test_order_validation(self):
         p = self.make_product(price=95, stock=40)
         self.assertEqual(self.order([{"product_id": p["id"], "quantity": p["stock"] + 1}])[0], 409)
@@ -467,12 +527,14 @@ class OrderTests(ServerCase):
         self.assertEqual(self.req("POST", "/api/orders", b"[1,2]")[0], 400)
         self.assertEqual(self.stock_of(p["id"]), 40, "failed orders must not change stock")
 
+    # المنتج المخفي لا يمكن طلبه (409).
     def test_hidden_product_cannot_be_ordered(self):
         p = self.make_product()
         cookie, csrf = self.login()
         self.json("PUT", f"/api/admin/products/{p['id']}", {"name": p["name"], "category": "curtains", "price": 250, "stock": 10, "image": "/assets/wavy-03.jpg", "active": False}, cookie=cookie, csrf=csrf)
         self.assertEqual(self.order([{"product_id": p["id"], "quantity": 1}])[0], 409)
 
+    # نص HTML خبيث في اسم العميل يُخزَّن كما هو ويُعاد كـ JSON؛ الهروب منه مسؤولية واجهة الإدارة (esc()).
     def test_xss_payload_is_stored_verbatim_and_returned_as_json(self):
         p = self.make_product()
         payload = "<img src=x onerror=alert(1)>"
@@ -484,6 +546,8 @@ class OrderTests(ServerCase):
         self.assertIn("onerror", body.decode())  # escaping happens in the admin UI (esc()), data stays intact
 
 
+# ---- حدود المعدل ----
+# قفل تسجيل الدخول: بعد 8 محاولات فاشلة تأتي 429 حتى لو كانت كلمة المرور الصحيحة، مع Retry-After=300.
 class RateLimitTests(ServerCase):
     def test_login_lockout_after_repeated_failures(self):
         for _ in range(8):
@@ -494,6 +558,7 @@ class RateLimitTests(ServerCase):
         self.assertEqual(resp.getheader("Retry-After"), "300")
 
 
+# تقييد الطلبات العامة: أول 10 طلبات ناجحة (201) ثم 429 لمنع إغراق المتجر بطلبات وهمية.
 class OrderRateLimitTests(ServerCase):
     def test_public_order_spam_is_limited(self):
         p = next(p for p in self.json("GET", "/api/products")[1]["products"] if p["stock"] >= 20)
@@ -505,6 +570,8 @@ class OrderRateLimitTests(ServerCase):
         self.assertEqual(codes[10:], [429, 429])
 
 
+# ---- وضع الوكيل العكسي (TRUST_PROXY): خلف Render/Nginx مثلًا ----
+# يحقق: كوكي Secure وترويسة HSTS عند X-Forwarded-Proto=https، والقفل لكل عميل حسب X-Forwarded-For.
 class ProxyModeTests(ServerCase):
     ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com"}
 
@@ -523,6 +590,7 @@ class ProxyModeTests(ServerCase):
         self.assertEqual(self.json("POST", "/api/admin/login", {"username": "admin", "password": "nope-nope-nope"},
                                    headers={"X-Forwarded-For": "198.51.100.2, 198.51.100.1"})[0], 429)
 
+    # PUBLIC_BASE_URL يحدد رابط sitemap في robots.txt ويتجاهل ترويسة Host المرسلة من المهاجم.
     def test_public_base_url_used_for_robots(self):
         cookie, csrf = self.login()
         self.json("PUT", "/api/admin/settings", {"site_ready": True}, cookie=cookie, csrf=csrf)
@@ -530,6 +598,8 @@ class ProxyModeTests(ServerCase):
         self.assertIn(b"Sitemap: https://shop.example.com/sitemap.xml", robots)
 
 
+# ---- كلمة مرور المدير عند أول تشغيل ومن البيئة ----
+# كل اختبار هنا يدير خادمه بنفسه لأنه يختبر طريقة بدء التشغيل (توليد كلمة مرور، رفض الضعيفة، قراءة ملف env).
 class FirstRunPasswordTests(ServerCase):
     @classmethod
     def setUpClass(cls):
@@ -539,6 +609,8 @@ class FirstRunPasswordTests(ServerCase):
     def tearDownClass(cls):
         pass
 
+    # بلا ADMIN_PASSWORD يولّد الخادم كلمة مرور عشوائية ويطبعها مرة واحدة فقط؛ ولا تُطبع ثانية عند إعادة
+    # التشغيل.
     def test_generated_password_is_printed_once_and_works(self):
         self.__class__.start_server()
         try:
@@ -562,6 +634,7 @@ class FirstRunPasswordTests(ServerCase):
         finally:
             self.__class__.stop_server()
 
+    # كلمة مرور من البيئة أقل من 12 حرفًا تمنع تشغيل الخادم (رمز خروج غير صفري ورسالة خطأ).
     def test_short_env_password_is_rejected(self):
         port = free_port()
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
@@ -573,10 +646,13 @@ class FirstRunPasswordTests(ServerCase):
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
+    # يشغّل التطبيق لمدة 3 ثوانٍ كحد أقصى؛ انتهاء المهلة (TimeoutExpired) يعني أن الخادم بدأ فعلًا بنجاح.
     def run_app(self, data_dir: str, **extra) -> subprocess.CompletedProcess:
         env = {**os.environ, "PORT": str(free_port()), "DATA_DIR": data_dir, **extra}
         return subprocess.run([sys.executable, "-I", str(ROOT / "app.py")], cwd=data_dir, capture_output=True, text=True, timeout=3, env=env)
 
+    # ALLOW_WEAK_PASSWORD خاص بالتطوير المحلي فقط: يُرفض إذا كان الخادم متاحًا من الخارج (HOST=0.0.0.0)
+    # أو خلف وكيل أو برابط عام، حتى لا تُستخدم كلمة مرور ضعيفة في الإنتاج.
     def test_weak_password_needs_local_dev_switch(self):
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
         try:
@@ -591,6 +667,7 @@ class FirstRunPasswordTests(ServerCase):
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
+    # ملف env المحلي يُقرأ (وعليه يعمل الدخول باسم مستخدم عربي)، وتبقى المتغيرات الحقيقية للبيئة هي الأقوى.
     def test_local_env_file_is_read_and_real_environment_wins(self):
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
         env_file = Path(data_dir) / "local.env"
@@ -612,11 +689,13 @@ class FirstRunPasswordTests(ServerCase):
         finally:
             self.__class__.stop_server()
 
+    # حماية من الأخطاء: كلمة مرور تجريبية قديمة يجب ألا تظهر في أي ملف مصدر.
     def test_no_hardcoded_credentials_in_repo_sources(self):
         for name in ("app.py", "README.md", "index.html", "admin.html"):
             self.assertNotIn("Fakhamah#2026Demo!", (ROOT / name).read_text(encoding="utf-8"), name)
 
 
+# ---- كتالوج المنتجات الأساسي (18 صورة من المالك) ----
 class CatalogueTests(ServerCase):
     def test_owner_photos_are_seeded_as_price_on_request_products(self):
         products = [p for p in self.json("GET", "/api/products")[1]["products"] if p["slug"].startswith("wavy-")]
@@ -633,6 +712,7 @@ class CatalogueTests(ServerCase):
             self.assertEqual(status, 200, p["image"])
             self.assertIn("image/jpeg", resp.getheader("Content-Type"))
 
+    # صور الكتالوج JPEG سليمة بلا بيانات EXIF وأقل من 400KB، ولا تُرفع لقطات شاشة المحادثة إلى المستودع.
     def test_photo_files_are_clean_jpegs(self):
         for n in range(1, 19):
             data = (ROOT / "assets" / f"wavy-{n:02d}.jpg").read_bytes()
@@ -643,6 +723,8 @@ class CatalogueTests(ServerCase):
         self.assertFalse([p for p in ROOT.rglob("*") if p.is_file() and "Screenshot_" in p.name and ".git" not in p.parts])
 
 
+# يتحقق أن بذر المنتجات يحدث مرة واحدة فقط (علامة seed_wavy_v1 في جدول settings)، فلا يعيد حذف المالك لمنتج.
+# لا يرث من ServerCase لأنه يشغّل الخادم ويوقفه عدة مرات على نفس مجلد البيانات.
 class CatalogueSeedOnceTests(unittest.TestCase):
     """Existing databases receive the photos once; deleting a product later is not undone by a restart."""
 
@@ -672,6 +754,9 @@ class CatalogueSeedOnceTests(unittest.TestCase):
         finally:
             shutil.rmtree(data_dir, ignore_errors=True)
 
+    # تنظيف المنتجات التجريبية القديمة: غير المعدّلة وبلا طلبات تُحذف، والمعدّلة تبقى، والتي لها طلبات
+    # تُخفى فقط
+    # حتى لا يضيع سجل الطلبات.
     def test_untouched_legacy_samples_are_retired_but_edited_ones_and_orders_are_kept(self):
         import sqlite3
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
@@ -704,6 +789,8 @@ class CatalogueSeedOnceTests(unittest.TestCase):
             shutil.rmtree(data_dir, ignore_errors=True)
 
 
+# ---- مساعد المصادقة الثنائية ----
+# تنفيذ مستقل لـ TOTP (RFC 6238) يُقارن به تنفيذ الخادم: HMAC-SHA1 على عدّاد كل 30 ثانية ثم اقتطاع 6 أرقام.
 def totp_now(secret: str, at: float | None = None) -> str:
     """Independent RFC 6238 implementation used to check the server's one."""
     import hashlib, hmac, struct
@@ -713,7 +800,9 @@ def totp_now(secret: str, at: float | None = None) -> str:
     return f"{(struct.unpack('>I', digest[off:off + 4])[0] & 0x7FFFFFFF) % 1000000:06d}"
 
 
+# ---- رفع الصور ومعرض صور المنتج وصورة القسم وترتيب الأقسام ----
 class GalleryAndCategoryTests(ServerCase):
+    # يرفع صورة عبر /api/admin/upload ويعيد {url, thumb}؛ الصورة المصغرة اختيارية.
     def upload(self, kw, raw=PNG, mime="image/png", thumb=True):
         body = {"data": data_uri(mime, raw)}
         if thumb:
@@ -722,6 +811,8 @@ class GalleryAndCategoryTests(ServerCase):
         self.assertEqual(status, 201, data)
         return data
 
+    # الرفع للمدير فقط، ويرفض البيانات التالفة أو غير المطابقة لنوعها، ويرد 413 على الجسم الأكبر من الحد
+    # قبل قراءته كاملًا.
     def test_upload_endpoint_validates_and_requires_admin(self):
         self.assertEqual(self.json("POST", "/api/admin/upload", {"data": data_uri("image/png", PNG)})[0], 401)
         cookie, csrf = self.login()
@@ -739,6 +830,9 @@ class GalleryAndCategoryTests(ServerCase):
         except (BrokenPipeError, ConnectionResetError):
             pass  # the server refused the body and closed the connection before it was fully sent
 
+    # المعرض: الترتيب يُحفظ والصورة الأولى هي الرئيسية، والصور المحذوفة تُمسح من القرص، والمسارات المزوّرة
+    # لا تدخل،
+    # والمعرض الفارغ مرفوض، وله حد أقصى للعدد؛ وحذف المنتج يحذف صوره.
     def test_product_gallery_order_primary_and_cleanup(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -773,6 +867,8 @@ class GalleryAndCategoryTests(ServerCase):
         for m in many:
             self.req("GET", m["url"])
 
+    # صورة القسم تُستبدل أو تُزال فتُحذف القديمة من القرص؛ وإعادة ترتيب الأقسام تشترط ذكر كل الأقسام (409
+    # وإلا).
     def test_category_image_and_reorder(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -801,7 +897,10 @@ class GalleryAndCategoryTests(ServerCase):
         self.json("DELETE", url, **kw)
 
 
+# ---- معايير عامة: CSP والضغط وETag وSEO لصفحة المنتج والصفحات القانونية والموافقة على الطلب ----
 class StandardsTests(ServerCase):
+    # سياسة CSP تعتمد nonce جديدًا لكل استجابة بدل unsafe-inline للسكربتات؛ وكل وسم script/style يحمله،
+    # ولا توجد معالجات أحداث مضمّنة (onclick=...). ما عدا JSON-LD لأنه بيانات وليس شيفرة.
     def test_csp_uses_nonces_and_no_unsafe_inline_scripts(self):
         for path in ("/", "/admin/", "/privacy", "/offline.html", "/product/wavy-03", "/products", "/categories",
                      "/category/curtains", "/about", "/contact", "/faq", "/no-such-page"):
@@ -821,6 +920,7 @@ class StandardsTests(ServerCase):
         n2 = re.search(r"nonce-([^']+)", self.req("GET", "/")[1].getheader("Content-Security-Policy")).group(1)
         self.assertNotEqual(n1, n2)
 
+    # ضغط gzip عند طلبه، وETag مع 304 للطلبات الشرطية، وكاش للملفات الثابتة بينما واجهات الإدارة no-store.
     def test_compression_etag_and_conditional_requests(self):
         status, resp, body = self.req("GET", "/api/products", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(resp.getheader("Content-Encoding"), "gzip")
@@ -847,6 +947,9 @@ class StandardsTests(ServerCase):
         self.assertEqual((status, data["ok"], data["db"]), (200, True, True))
         self.assertRegex(data["version"], r"^\d+\.\d+\.\d+$")
 
+    # صفحة المنتج تُولَّد من الخادم مع وسوم SEO. المنتج بلا سعر لا يُعلن كـ Product (يرفضه Google بلا
+    # Offer)،
+    # والمنتج المسعّر ينشر Offer بعملة SAR، والوصف يُهرَّب فلا يظهر HTML خام في الوسوم.
     def test_product_page_has_server_rendered_seo_and_structured_data(self):
         status, resp, body = self.req("GET", "/product/wavy-03", headers={"Host": "shop.example.org"})
         self.assertEqual(status, 200)
@@ -876,6 +979,8 @@ class StandardsTests(ServerCase):
         self.assertNotIn("<b>x</b>", body.decode(), "descriptions are escaped in meta tags")
         self.json("DELETE", f"/api/admin/products/{made['product']['id']}", **kw)
 
+    # sitemap يعرض المنتجات والأقسام التي فيها منتجات فقط، وعلى صفحات المتجر وسوم canonical وhreflang بعد
+    # اعتماد المتجر.
     def test_sitemap_lists_products_only_when_ready(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -900,6 +1005,7 @@ class StandardsTests(ServerCase):
         finally:
             self.json("PUT", "/api/admin/settings", {"site_ready": False}, **kw)
 
+    # صفحتا الخصوصية والشروط تأخذان بيانات التواصل من إعدادات المتجر.
     def test_legal_pages(self):
         for path, title in (("/privacy", "سياسة الخصوصية"), ("/terms", "الشروط والأحكام")):
             status, resp, body = self.req("GET", path)
@@ -908,6 +1014,9 @@ class StandardsTests(ServerCase):
             self.assertIn("+966 57 648 6491", body.decode(), "contact details come from the store settings")
             self.assertIn('lang="ar"', body.decode())
 
+    # الطلب يتطلب موافقة صريحة (القيمة المنطقية true فقط، لا النص "yes"). ومفتاح Idempotency-Key يمنع تكرار
+    # الطلب
+    # عند إعادة المحاولة: الرد الثاني يعيد نفس الطلب (200) دون خصم مخزون إضافي.
     def test_order_requires_consent_and_is_idempotent(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -932,7 +1041,9 @@ class StandardsTests(ServerCase):
         self.json("DELETE", f"/api/admin/products/{pid}", **kw)
 
 
+# ---- سجل التدقيق ولوحة المؤشرات ----
 class AuditAndDashboardTests(ServerCase):
+    # كل عملية إدارية تُسجَّل، ولا يحتوي السجل على كلمات مرور أو رمز CSRF.
     def test_admin_actions_are_audited_without_secrets(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -953,6 +1064,7 @@ class AuditAndDashboardTests(ServerCase):
         self.assertNotIn(csrf, text)
         self.assertTrue(all(e["ip"] for e in log["entries"]))
 
+    # لوحة المؤشرات تعرض سلسلة 14 يومًا ومنتجات المخزون المنخفض.
     def test_dashboard_has_daily_series_and_low_stock_items(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -967,7 +1079,9 @@ class AuditAndDashboardTests(ServerCase):
         self.json("DELETE", f"/api/admin/products/{made['product']['id']}", **kw)
 
 
+# ---- المصادقة الثنائية (TOTP) ----
 class TwoFactorTests(ServerCase):
+    # يطابق وحدة totp مع متجهات الاختبار الرسمية في RFC 6238 (مفتاح SHA-1 القياسي).
     def test_totp_matches_rfc_6238_vectors(self):
         sys.path.insert(0, str(ROOT))
         import totp
@@ -978,6 +1092,9 @@ class TwoFactorTests(ServerCase):
         self.assertFalse(totp.verify(secret, "000000", 59))
         self.assertFalse(totp.verify(secret, "", 59))
 
+    # سير التفعيل: setup ثم enable برمز صحيح؛ بعدها لا يكفي الدخول بكلمة المرور (need_code)، وتعطيلها يتطلب
+    # كلمة المرور ورمزًا.
+    # كوكي fakhama_admin_flag مقروء من JavaScript عمدًا لإبعاد زيارات المدير عن الإحصاءات.
     def test_two_factor_login_flow(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -1007,6 +1124,8 @@ class TwoFactorTests(ServerCase):
         self.assertEqual(self.json("POST", "/api/admin/login", {"username": "admin", "password": self.admin_password})[0], 200)
 
 
+# ---- أمر backup من سطر الأوامر ----
+# ينشئ نسخًا متسقة من القاعدة والصور ويحذف الأقدم بحسب BACKUP_KEEP؛ ويفحص سلامة النسخة (integrity_check).
 class BackupTests(unittest.TestCase):
     def test_backup_command_creates_consistent_copies_and_prunes(self):
         import sqlite3
@@ -1028,15 +1147,19 @@ class BackupTests(unittest.TestCase):
             shutil.rmtree(data_dir, ignore_errors=True)
 
 
+# ---- دوال مساعدة لتحليل صفحات HTML ----
+# main_of يقتطع محتوى الصفحة الخاص بها بين علامتي main:start وmain:end داخل القالب المشترك.
 def main_of(html: str) -> str:
     """The page's own content (between the shell's main markers)."""
     return html.split("<!--main:start-->", 1)[1].split("<!--main:end-->", 1)[0]
 
 
+# يستخرج كتل JSON-LD (البيانات المنظمة لمحركات البحث) من الصفحة ويحوّلها إلى قواميس.
 def ld_blocks(html: str) -> list[dict]:
     return [json.loads(b) for b in re.findall(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', html, re.S)]
 
 
+# يجمع سمات الأحداث الحقيقية (onclick وغيرها) بمحلل HTML، فلا يخدعه نص مهرَّب يحتوي onerror= كنص عادي.
 def handler_attributes(html: str) -> list[str]:
     """Real on*= attributes in the markup (escaped text that merely contains 'onerror=' does not count)."""
     from html.parser import HTMLParser
@@ -1049,20 +1172,25 @@ def handler_attributes(html: str) -> list[str]:
     return found
 
 
+# يعيد نوع كتلة JSON-LD كنص (وإن كان النوع قائمة يدمجها بعلامة +).
 def ld_type(block: dict) -> str:
     kind = block.get("@type")
     return kind if isinstance(kind, str) else "+".join(kind)
 
 
+# ---- صفحات المتجر المولَّدة من الخادم داخل القالب المشترك (shell) ----
 class StorePagesTests(ServerCase):
     """About, products, categories, one category, one product, contact, FAQ, branded 404 — all inside the shared shell."""
     PAGES = {"/products": "products", "/categories": "categories", "/category/curtains": "category", "/product/wavy-03": "product",
              "/about": "about", "/contact": "contact", "/faq": "faq"}
 
+    # يجلب صفحة ويعيد جسمها كنص.
     def page(self, path: str, **kw) -> tuple[int, http.client.HTTPResponse, str]:
         status, resp, body = self.req("GET", path, **kw)
         return status, resp, body.decode()
 
+    # كل صفحة: h1 واحد، فتات تنقل صحيحة، عناصر القالب المشترك موجودة، ولا معرّفات id مكررة ولا روابط
+    # javascript:.
     def test_every_page_renders_inside_the_shared_shell(self):
         for path, name in self.PAGES.items():
             status, resp, html = self.page(path)
@@ -1090,6 +1218,8 @@ class StorePagesTests(ServerCase):
             self.assertIn("<!--main:start-->", html)
             self.assertEqual(self.req("HEAD", path)[0], 200, path)
 
+    # البيانات المنظمة وعناوين الصفحات لكل صفحة؛ وكلها noindex حتى يعتمد المالك المتجر، وصفحة نتائج البحث
+    # تبقى خارج الفهرس دائمًا.
     def test_structured_data_and_meta_per_page(self):
         expected = {"/products": {"BreadcrumbList", "CollectionPage"}, "/categories": {"BreadcrumbList", "CollectionPage"},
                     "/category/curtains": {"BreadcrumbList", "CollectionPage"}, "/product/wavy-03": {"BreadcrumbList"},
@@ -1130,6 +1260,7 @@ class StorePagesTests(ServerCase):
         finally:
             self.json("PUT", "/api/admin/settings", {"site_ready": False}, cookie=cookie, csrf=csrf)
 
+    # صفحة المنتجات تعرض الكتالوج من الخادم؛ والبحث ?q= يفلتر الشبكة ويُهرَّب الإدخال الخبيث.
     def test_products_page_server_renders_the_catalogue(self):
         _, _, html = self.page("/products")
         main = main_of(html)
@@ -1158,6 +1289,7 @@ class StorePagesTests(ServerCase):
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", main_of(html))
         self.assertIn('class="no-results"', main_of(html))
 
+    # صفحات الأقسام تتبع الكتالوج: لا يظهر إلا ما فيه منتجات، والقسم المخفي يعطي 404.
     def test_categories_and_category_pages_follow_the_catalogue(self):
         _, _, html = self.page("/categories")
         index = re.search(r'<div class="category-grid" id="categoryIndex">(.*?)</div></section>', main_of(html), re.S).group(1)
@@ -1201,6 +1333,7 @@ class StorePagesTests(ServerCase):
             self.json("DELETE", f"/api/admin/products/{made['product']['id']}", **kw)
         self.assertEqual(self.page("/category/does-not-exist")[0], 404)
 
+    # تفاصيل صفحة المنتج: المعرض والسعر وزر الإضافة (يُعطَّل عند نفاد المخزون)، والمنتج المخفي يعطي 404.
     def test_product_page_markup_and_states(self):
         status, _, html = self.page("/product/wavy-03", headers={"Host": "shop.example.org"})
         self.assertEqual(status, 200)
@@ -1244,6 +1377,8 @@ class StorePagesTests(ServerCase):
         finally:
             self.json("DELETE", f"/api/admin/products/{product['id']}", **kw)
 
+    # محتوى من نحن والتواصل والأسئلة الشائعة: لا يظهر واتساب أو أوقات العمل قبل أن يحددهما المالك،
+    # ونموذج التواصل فيه تسميات ومصيدة bots (honeypot) مخفية.
     def test_about_contact_and_faq_content(self):
         sys.path.insert(0, str(ROOT))
         import pages
@@ -1299,6 +1434,8 @@ class StorePagesTests(ServerCase):
         self.assertEqual(re.findall(r"<summary>(.*?)</summary>", block), [q for q, _ in pages.FAQ])
         self.assertIn('<body data-page="home">', home, "the home page keeps its own shell")
 
+    # نص HTML/JS خبيث في إعدادات المتجر والأقسام والمنتجات يجب أن يُهرَّب في كل الصفحات العامة ولا يظهر أي
+    # معالج حدث حي.
     def test_hostile_text_is_escaped_on_every_page(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -1331,6 +1468,9 @@ class StorePagesTests(ServerCase):
                                                      "tagline": "تفصيل ستائر وأقمشة في جدة",
                                                      "delivery_note": "تفصيل الستائر حسب المقاس؛ تواصل مع المتجر لتأكيد التوصيل والتركيب بحسب موقعك."}, **kw)
 
+    # صفحة 404 موحّدة مع noindex؛ الملفات تبقى بـ 404 نصي. والمسار المنتهي بـ / يُحوَّل 301 دون السماح بـ
+    # open redirect
+    # (المسارات التي تبدأ بـ // لا تعيد توجيه إلى موقع خارجي).
     def test_not_found_and_redirects(self):
         for path in ("/no-such-page", "/products/extra", "/category/", "/product/", "/.git/config", "/about/team"):
             status, resp, html = self.page(path)
@@ -1371,16 +1511,19 @@ class StorePagesTests(ServerCase):
         self.assertIn('<body data-page="home">', html)
 
 
+# ---- النص الافتراضي لصفحة من نحن (يجب أن يطابق ما في الخادم) ----
 DEFAULT_ABOUT = ("الفخامة للأقمشة والستائر متجر في جدة للأقمشة والستائر وتفصيلها.\n\n"
                  "نفصّل الستائر حسب مقاس نافذتك، ونوفّر ستائر رول وشرائح معدنية وستائر كهربائية، إلى جانب أقمشة الستائر.\n\n"
                  "قبل بدء التفصيل نؤكد معك المقاسات ونوع القماش والسعر النهائي، لتكون الصورة واضحة قبل اعتماد الطلب.")
 
 
+# ترميز URL كاملًا (حتى الشرطة المائلة) للنص العربي في معاملات الاستعلام.
 def quote_url(text: str) -> str:
     from urllib.parse import quote
     return quote(text, safe="")
 
 
+# ---- نموذج التواصل: POST /api/contact (عام بلا تسجيل دخول ولا CSRF) ----
 class ContactTests(ServerCase):
     ENV = {"CONTACT_LIMIT_PER_10MIN": "1000"}  # many messages here; the limiter has its own class below
     VALID = {"name": "عميل التواصل", "phone": "0551234567", "message": "أريد الاستفسار عن ستائر رول لغرفة النوم", "consent": True}
@@ -1394,6 +1537,8 @@ class ContactTests(ServerCase):
         self.assertEqual(status, 200, data)
         return data["messages"]
 
+    # الرسالة الصحيحة تُخزَّن؛ الأرقام الهندية تُحوَّل لعربية-لاتينية، والحقول الزائدة (status/id) تُتجاهل،
+    # والنص يبقى كما هو.
     def test_valid_message_is_stored_without_login_or_csrf(self):
         status, data, resp = self.post(email="client@example.com", page="/contact", name="  عميل التواصل  ")
         self.assertEqual((status, data), (201, {"ok": True}))
@@ -1410,6 +1555,8 @@ class ContactTests(ServerCase):
         self.assertEqual(self.post(message="<img src=x onerror=alert(1)> سؤال")[0], 201)
         self.assertEqual(self.stored()[0]["message"], "<img src=x onerror=alert(1)> سؤال")
 
+    # أي مدخل خاطئ (طول الاسم/الهاتف/الرسالة، بريد غير صالح، موافقة ناقصة، JSON تالف) يعطي 400 ولا يُخزَّن
+    # شيء؛ والحدود شاملة.
     def test_validation_errors_store_nothing(self):
         before = len(self.stored())
         bad = [dict(name="x"), dict(name="ن" * 81), dict(name=None), dict(phone="12345"), dict(phone="1" * 17), dict(phone=""),
@@ -1431,12 +1578,15 @@ class ContactTests(ServerCase):
         self.assertEqual(self.post(name="ن" * 80, phone="1" * 16, message="س" * 2000, email=("x" * 108) + "@example.com")[0], 201)
         self.assertEqual(self.post(name="نو", phone="12345678", message="سؤال؟")[0], 201)
 
+    # حقل page يُنظَّف: يُقبل مسار داخلي فقط (يبدأ بـ / ولا // ولا مسافات) ويُقص إلى 120 حرفًا.
     def test_page_hint_is_cleaned(self):
         for sent, kept in (("/contact", "/contact"), ("javascript:alert(1)", ""), ("//evil.example", ""), ("https://x.y/", ""),
                            ("/product/%D8%B3%D8%AA%D8%A7%D8%B1%D8%A9", "/product/ستارة"), ("/" + "a" * 300, "/" + "a" * 119), ("/a b", ""), (5, "")):
             self.assertEqual(self.post(page=sent)[0], 201, sent)
             self.assertEqual(self.stored()[0]["page"], kept, sent)
 
+    # حقل website مخفي عن البشر: إن ملأه بوت يرد الخادم نجاحًا شكليًا (201) دون تخزين، فلا يعرف البوت أنه
+    # كُشف.
     def test_honeypot_is_accepted_silently_and_dropped(self):
         before = len(self.stored())
         status, data, _ = self.json("POST", "/api/contact", {"name": "bot", "phone": "1", "message": "x", "website": "http://spam.example"})
@@ -1447,6 +1597,8 @@ class ContactTests(ServerCase):
         self.assertEqual(self.post(website="")[0], 201, "an empty honeypot is a person")
         self.assertEqual(len(self.stored()), before + 1)
 
+    # النموذج يعمل بدون JavaScript (POST بصيغة form) ويعيد صفحة HTML؛ وعند الخطأ يحتفظ بما كتبه الزائر بعد
+    # التهريب.
     def test_form_post_without_javascript(self):
         from urllib.parse import urlencode
         form = {"name": "زائر بلا سكربت", "phone": "0551112222", "email": "", "message": "<b>سؤال</b> عن الأقمشة", "consent": "1",
@@ -1470,6 +1622,8 @@ class ContactTests(ServerCase):
         self.assertIn('content="noindex,nofollow"', html)
 
 
+# حد رسائل التواصل: 5 رسائل مقبولة لكل عميل ثم 429 (Retry-After=600)؛ والبوتات (honeypot) لا تعرف بوجود
+# الحد.
 class ContactRateLimitTests(ServerCase):
     def test_accepted_messages_are_limited_per_client(self):
         body = {"name": "عميل", "phone": "0551234567", "message": "رسالة تجريبية", "consent": True}
@@ -1483,6 +1637,7 @@ class ContactRateLimitTests(ServerCase):
         self.assertEqual(self.json("POST", "/api/contact", {**body, "website": "x"})[0], 201, "bots never learn about the limit")
 
 
+# ---- إدارة الرسائل في لوحة الإدارة: تتطلب تسجيل دخول وCSRF ----
 class AdminMessagesTests(ServerCase):
     ENV = {"CONTACT_LIMIT_PER_10MIN": "1000"}
 
@@ -1504,6 +1659,8 @@ class AdminMessagesTests(ServerCase):
         self.assertEqual(resp.getheader("Cache-Control"), "no-store")
         self.assertIn("noindex", resp.getheader("X-Robots-Tag"))
 
+    # القائمة من الأحدث، والفلترة بالحالة، والعدّادات، وتغيير الحالة (handled_at) والحذف، وتسجيلها في سجل
+    # التدقيق.
     def test_list_filter_status_counts_delete_and_audit(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -1547,7 +1704,9 @@ class AdminMessagesTests(ServerCase):
         self.assertIn("message_delete", actions)
 
 
+# ---- نصوص قابلة للتحرير: من نحن وأوقات العمل ووصف القسم ----
 class SettingsAndCategoryContentTests(ServerCase):
+    # حفظ النصوص مع حدود الطول (120 للعنوان و3000 للنص و300 لأوقات العمل)، والعنوان الفارغ يرجع للافتراضي.
     def test_about_settings_round_trip_and_limits(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -1578,6 +1737,7 @@ class SettingsAndCategoryContentTests(ServerCase):
         self.assertIn('<h1 id="pageTitle">من نحن</h1>', self.req("GET", "/about")[2].decode())
         self.assertEqual(self.json("GET", "/api/store")[1]["phone"], "+966 57 648 6491", "contact details untouched")
 
+    # وصف القسم يُقص عند 400 حرف، ويبقى إن لم يرسله العميل في التحديث، ويظهر في الصفحة ووصف meta.
     def test_category_description_round_trip(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -1606,10 +1766,13 @@ class SettingsAndCategoryContentTests(ServerCase):
             self.json("DELETE", url, **kw)
 
 
+# ---- اختبارات وحدات مباشرة لوحدة pages (دون تشغيل خادم) ----
 class ShellUnitTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(ROOT))
 
+    # fill_shell يضع محتوى الصفحة في القالب ويهرّب القيم ويعلّم رابط التنقل الحالي، ويفشل بخطأ إن غابت
+    # علامات القالب.
     def test_fill_shell_swaps_main_body_styles_and_marks_the_nav(self):
         import pages
         template = ('<html><head><title>t</title></head><body data-page="home" class="x"><nav class="main-nav" id="mainNav">'
@@ -1626,6 +1789,7 @@ class ShellUnitTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             pages.fill_shell("<html><body></body></html>", "x", "faq")
 
+    # دوال مساعدة: أرقام عربية، عرض السعر، روابط آمنة (javascript: يُرفض)، وبطاقة المنتج تُهرَّب اسمها.
     def test_home_faq_and_card_helpers(self):
         import pages
         template = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -1644,6 +1808,7 @@ class ShellUnitTests(unittest.TestCase):
         self.assertIn('<button class="quick-add" data-quick="7">عرض التفاصيل</button>', card)
         self.assertIn("٢٠ <small>ر.س</small>", card)
 
+    # دوال SEO: اقتطاع الوصف، sitemap، فتات التنقل، وعنوان الصفحة ووصفها.
     def test_seo_helpers(self):
         import seo
         self.assertTrue(seo.clip("كلمة " * 80).endswith("…"))
@@ -1660,6 +1825,7 @@ class ShellUnitTests(unittest.TestCase):
 
 
 
+# ---- اختبارات انحدار لثغرات وأخطاء ظهرت في مراجعة أمنية للصفحات الجديدة (راجع docstring الصنف) ----
 class ReviewFixTests(ServerCase):
     """Regression tests for the findings of the security/server review of the new pages."""
     ENV = {"CONTACT_LIMIT_PER_10MIN": "1000"}
@@ -1672,11 +1838,15 @@ class ReviewFixTests(ServerCase):
         cookie, _ = self.login()
         return self.json("GET", "/api/admin/messages", cookie=cookie)[1]["messages"][0]
 
+    # أمني: البريد لا يقبل محارف mailto (? & # / %) التي قد تحقن ترويسات مثل bcc في رابط mailto: بلوحة
+    # الإدارة.
     def test_email_cannot_carry_mailto_headers(self):
         for email in ("victim@shop.sa?bcc=attacker%40evil.example", "a@b.sa&body=x", "a@b.sa#x", "a/b@shop.sa", "a%40b@shop.sa"):
             self.assertEqual(self.post(email=email)[0], 400, email)
         self.assertEqual(self.post(email="first.last+tag@mail.example.sa")[0], 201)
 
+    # أمني: طلب من موقع آخر (Sec-Fetch-Site/Origin) يُرفض 403، والجسم غير JSON يُرفض 415، لمنع تزوير
+    # الطلبات عبر المواقع.
     def test_cross_site_and_non_json_posts_are_refused(self):
         self.assertEqual(self.post(headers={"Sec-Fetch-Site": "cross-site"})[0], 403)
         self.assertEqual(self.post(headers={"Origin": "https://evil.example"})[0], 403)
@@ -1686,6 +1856,7 @@ class ReviewFixTests(ServerCase):
             status, _, _ = self.req("POST", "/api/contact", body, headers={"Content-Type": ctype})
             self.assertEqual(status, 415, ctype)
 
+    # JSON غريب (محارف surrogate، أرقام ضخمة، تداخل عميق جدًا) يعطي 400 وليس خطأ خادم 500.
     def test_odd_json_is_a_400_not_a_500(self):
         self.assertEqual(self.post(name="اسم \ud800 غريب")[0], 400)
         huge = b'{"name":"ab","phone":' + b"9" * 4400 + b',"message":"hello","consent":true}'
@@ -1693,17 +1864,21 @@ class ReviewFixTests(ServerCase):
         deep = b'{"name":' + b"[" * 5000 + b"]" * 5000 + b"}"
         self.assertEqual(self.req("POST", "/api/contact", deep)[0], 400)
 
+    # محارف التحكم والاتجاه (مثل RLO) والمحارف غير المرئية تُزال من الاسم والرسالة، لمنع خداع العرض في لوحة
+    # الإدارة.
     def test_control_and_bidi_characters_are_removed(self):
         self.assertEqual(self.post(name="\u202eevil\u0000x\u200b", message="سطر\u0000 أول\r\nسطر\u2066 ثانٍ")[0], 201)
         latest = self.latest()
         self.assertEqual((latest["name"], latest["message"]), ("evilx", "سطر أول\nسطر ثانٍ"))
         self.assertEqual(self.post(name="\u200b\u200b")[0], 400, "invisible-only names are too short")
 
+    # السطر الجديد CRLF يُحسب حرفًا واحدًا كما يحسبه المتصفح، حتى لا تُرفض رسالة طولها مقبول عند المستخدم.
     def test_crlf_counts_as_one_character(self):
         message = "\r\n".join(["ب" * 399] * 5)  # 1999 characters as the browser counts them, 2003 as sent
         self.assertEqual(self.post(message=message)[0], 201)
         self.assertNotIn("\r", self.latest()["message"])
 
+    # معرّف الرسالة الضخم أو الحالة غير النصية تعطي 4xx لا 500.
     def test_admin_message_routes_reject_bad_input_with_4xx(self):
         self.assertEqual(self.post()[0], 201)
         cookie, csrf = self.login()
@@ -1715,17 +1890,20 @@ class ReviewFixTests(ServerCase):
         self.assertEqual(self.json("DELETE", f"/api/admin/messages/{big}", cookie=cookie, csrf=csrf)[0], 404)
         self.assertEqual(self.json("DELETE", "/api/admin/messages/999999999999999999", cookie=cookie, csrf=csrf)[0], 404)
 
+    # صفحة 404 تُضغط بـ gzip أيضًا.
     def test_error_pages_are_compressed(self):
         status, resp, body = self.req("GET", "/no-such-page", headers={"Accept-Encoding": "gzip"})
         self.assertEqual((status, resp.getheader("Content-Encoding")), (404, "gzip"))
         self.assertIn("الصفحة غير موجودة", gzip.decompress(body).decode())
 
+    # الصفحات المفهرسة بـ noindex لا تحمل canonical ولا og:url فارغًا.
     def test_noindex_pages_have_no_empty_canonical_or_og_url(self):
         for path in ("/products", "/about", "/no-such-page", "/products?q=x"):
             html = self.req("GET", path)[2].decode()
             self.assertNotIn('rel="canonical"', html, path)
             self.assertNotIn('og:url" content=""', html, path)
 
+    # قواعد العدد العربية (المثنى، الجمع 3-10، التمييز المفرد بعد 10) تطابق الرقم.
     def test_arabic_counts_agree_with_the_number(self):
         sys.path.insert(0, str(ROOT))
         import pages
@@ -1733,6 +1911,7 @@ class ReviewFixTests(ServerCase):
                          ["لا توجد منتجات", "منتج واحد", "منتجان", "٣ منتجات", "١٠ منتجات", "١١ منتجًا", "١٨ منتجًا", "١٠٣ منتجات"])
         self.assertEqual(pages.count_ar(1, "piece"), "قطعة واحدة")
 
+    # تفاصيل المتجر في تذييل الصفحة تُرسم من الخادم لا من الجافاسكربت.
     def test_footer_store_details_are_server_rendered(self):
         html = self.req("GET", "/about")[2].decode()
         self.assertNotIn("<span data-store-city>أضف المدينة", html)
@@ -1740,6 +1919,7 @@ class ReviewFixTests(ServerCase):
         self.assertNotIn('id="storeContact">أضف رقم الهاتف', html)
         self.assertIn('href="tel:+966576486491"', html)
 
+    # تعديل اسم المنتج لا يغيّر رابطه (slug) حتى لا تنكسر الروابط المنشورة.
     def test_editing_a_product_keeps_its_url(self):
         cookie, csrf = self.login()
         kw = dict(cookie=cookie, csrf=csrf)
@@ -1752,6 +1932,7 @@ class ReviewFixTests(ServerCase):
         self.assertEqual(data["product"]["slug"], "wavy-03")
         self.assertEqual(self.req("GET", "/product/wavy-03")[0], 200)
 
+    # مخطط المتجر بلا inLanguage، وعدد عناصر القائمة في JSON-LD يطابق عناصرها فعلًا.
     def test_store_schema_has_no_inlanguage_and_item_list_count_matches(self):
         sys.path.insert(0, str(ROOT))
         import seo
@@ -1760,7 +1941,9 @@ class ReviewFixTests(ServerCase):
         listing = seo.collection_schema("https://shop.example", "/products", "n", "d", [(f"p{i}", f"/product/p{i}") for i in range(150)])["mainEntity"]
         self.assertEqual(listing["numberOfItems"], len(listing["itemListElement"]))
 
+# ---- اختبارات وحدات لوحدة seo ----
 class SeoUnitTests(unittest.TestCase):
+    # أمني: JSON-LD لا يحتوي محرف < خامًا، فلا يمكن إغلاق وسم script من داخل البيانات.
     def test_json_ld_cannot_break_out_of_the_script_tag(self):
         sys.path.insert(0, str(ROOT))
         import seo
@@ -1768,6 +1951,7 @@ class SeoUnitTests(unittest.TestCase):
         self.assertNotIn("<", text)
         self.assertEqual(json.loads(text)["name"], "</script><script>alert(1)</script>")
 
+    # قيم وسوم meta تُهرَّب (علامات الاقتباس و<)، فلا تنكسر السمة ولا تُحقن سمات.
     def test_meta_values_are_escaped(self):
         sys.path.insert(0, str(ROOT))
         import seo
@@ -1779,9 +1963,11 @@ class SeoUnitTests(unittest.TestCase):
         self.assertNotIn("onerror='y", out.split("</head>")[0].replace("&#x27;", ""))
 
 
+# ---- ترقية قواعد البيانات القديمة عند بدء التشغيل ----
 class LegacyDataMigrationTests(unittest.TestCase):
     """A database created by the original build stores 'assets/x.jpg'; it must be fixed up on start."""
 
+    # تحويل مسارات الصور القديمة 'assets/x.jpg' إلى '/assets/x.jpg' (مطلقة من الجذر) عند بدء الخادم.
     def test_relative_image_paths_are_migrated(self):
         import sqlite3
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
@@ -1802,6 +1988,7 @@ class LegacyDataMigrationTests(unittest.TestCase):
         finally:
             ServerCase.stop_server.__func__(ServerCase)
 
+    # قاعدة قديمة بلا جدول messages وبلا عمود وصف القسم وبلا إعدادات من نحن تُرقّى تلقائيًا ويعمل الموقع.
     def test_database_without_messages_or_category_text_is_upgraded(self):
         import sqlite3
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
@@ -1840,6 +2027,7 @@ def shop_day(offset: int = 0) -> str:
     return (datetime.now(SHOP_TZ).date() - timedelta(days=offset)).isoformat()
 
 
+# يقرأ مباشرة من store.db الخاص بخادم الاختبار (للتحقق مما خُزّن فعلًا).
 def db_rows(data_dir: str, sql: str, args=()) -> list[tuple]:
     import sqlite3
     conn = sqlite3.connect(Path(data_dir) / "store.db", timeout=20)
@@ -1849,6 +2037,7 @@ def db_rows(data_dir: str, sql: str, args=()) -> list[tuple]:
         conn.close()
 
 
+# ينفّذ أمر كتابة مباشرًا على قاعدة الاختبار (executemany إن مُررت صفوف)، لتجهيز بيانات أو تنظيفها.
 def db_exec(data_dir: str, sql: str, rows: list[tuple] | None = None) -> None:
     import sqlite3
     conn = sqlite3.connect(Path(data_dir) / "store.db", timeout=20)
@@ -1862,24 +2051,29 @@ def db_exec(data_dir: str, sql: str, rows: list[tuple] | None = None) -> None:
         conn.close()
 
 
+# ---- عدّ الزيارات: إحصاءات مجمّعة بلا بيانات شخصية ----
 class AnalyticsCountingTests(ServerCase):
     ENV = {"CONTACT_LIMIT_PER_10MIN": "1000"}
 
+    # مجموع المشاهدات لكل مسار ولكل مصدر إحالة من الجدولين page_views وreferrers.
     def counts(self) -> tuple[dict, dict]:
         pages = dict(db_rows(self.data_dir, "SELECT path, SUM(views) FROM page_views GROUP BY path"))
         refs = dict(db_rows(self.data_dir, "SELECT host, SUM(views) FROM referrers GROUP BY host"))
         return pages, refs
 
+    # زيارة بمتصفح عادي افتراضيًا (User-Agent عند None يُحذف)؛ تعيد حالة HTTP فقط.
     def visit(self, path, method="GET", ua=BROWSER_UA, **headers):
         hdrs = dict(headers)
         if ua is not None:
             hdrs["User-Agent"] = ua
         return self.req(method, path, headers=hdrs)[0]
 
+    # الفرق بين عدّادين: يُبقي المفاتيح التي تغيّرت فقط.
     @staticmethod
     def delta(before: dict, after: dict) -> dict:
         return {k: after.get(k, 0) - before.get(k, 0) for k in set(before) | set(after) if after.get(k, 0) != before.get(k, 0)}
 
+    # تُحتسب مشاهدة واحدة لكل صفحة عامة ناجحة، وتُخزَّن بمسار الصفحة فقط دون نص البحث.
     def test_successful_public_page_views_are_counted_once_per_page(self):
         before, _ = self.counts()
         visits = {"/": "/", "/index.html": "/", "/products": "/products", "/products?q=%D8%B3%D8%AA%D8%A7%D8%B1%D8%A9": "/products",
@@ -1895,6 +2089,9 @@ class AnalyticsCountingTests(ServerCase):
         self.assertLessEqual({r[0] for r in db_rows(self.data_dir, "SELECT path FROM page_views")}, set(visits.values()))
         self.assertEqual({r[0] for r in db_rows(self.data_dir, "SELECT day FROM page_views")}, {shop_day()})
 
+    # لا تُحتسب: الزيارات المسبقة (prefetch) وطلبات HEAD والبوتات وروابط المعاينة، ولا المدير، ولا الأخطاء
+    # والتحويلات،
+    # ولا الملفات وواجهات API ولوحة الإدارة، ولا إرسال النموذج بـ POST.
     def test_bots_prefetch_head_errors_assets_api_and_the_admin_are_not_counted(self):
         cookie, _ = self.login()
         before, refs_before = self.counts()
@@ -1937,6 +2134,7 @@ class AnalyticsCountingTests(ServerCase):
         self.assertEqual(self.delta(before, after), {}, "nothing above is a customer page view")
         self.assertEqual(self.delta(refs_before, refs_after), {})
 
+    # مصدر الإحالة يُخزَّن اسم المضيف فقط (بلا مسار أو استعلام)؛ ويُهمل الانتقال بين صفحات المتجر نفسه.
     def test_referrers_store_only_another_site_host_name(self):
         _, before = self.counts()
         host = f"127.0.0.1:{self.port}"
@@ -1960,6 +2158,7 @@ class AnalyticsCountingTests(ServerCase):
         stored_hosts = {r[0] for r in db_rows(self.data_dir, "SELECT host FROM referrers")}
         self.assertFalse([h for h in stored_hosts if "/" in h or "?" in h or "private" in h], stored_hosts)
 
+    # حماية من تضخم الجدول: بعد حد معين من المضيفين الجدد في اليوم تُجمَّع الإحالات الجديدة تحت "other".
     def test_forged_referrers_cannot_grow_the_table_without_bound(self):
         today = shop_day()
         db_exec(self.data_dir, "INSERT OR IGNORE INTO referrers(day,host,views) VALUES(?,?,1)", [(today, f"filler{i}.example") for i in range(200)])
@@ -1971,6 +2170,7 @@ class AnalyticsCountingTests(ServerCase):
         self.assertFalse(db_rows(self.data_dir, "SELECT 1 FROM referrers WHERE host='brand-new-site.example'"))
         db_exec(self.data_dir, "DELETE FROM referrers WHERE host LIKE 'filler%' OR host='other'")  # other tests use today's rows
 
+    # خصوصية: جدولا الإحصاء يحتويان يومًا ومسارًا/مضيفًا وعددًا فقط، ولا يُضبط أي كوكي عند الزيارة.
     def test_no_visitor_data_is_stored(self):
         self.visit("/", Referer="https://www.google.com/", Cookie="tracking=abc")
         tables = {r[0] for r in db_rows(self.data_dir, "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -1982,9 +2182,12 @@ class AnalyticsCountingTests(ServerCase):
         self.assertIsNone(resp.getheader("Set-Cookie"), "counting a visit sets no cookie")
 
 
+# ---- تقرير الإحصاءات في لوحة الإدارة ----
 class AnalyticsReportTests(ServerCase):
     ENV = {"CONTACT_LIMIT_PER_10MIN": "1000"}
 
+    # التقرير للمدير فقط، والفترة المسموحة 7 أو 30 أو 90 يومًا (غير ذلك 400)، وسلسلة أيام كاملة تنتهي
+    # باليوم الحالي.
     def test_admin_only_and_period_validation(self):
         self.assertEqual(self.json("GET", "/api/admin/analytics")[0], 401)
         self.assertEqual(self.json("GET", "/api/admin/analytics?days=30")[0], 401)
@@ -2004,6 +2207,9 @@ class AnalyticsReportTests(ServerCase):
                 self.assertIn(key, data)
             self.assertEqual(set(data["totals"]), {"today", "last7", "last30"})
 
+    # يملأ الجداول مباشرة ببيانات معروفة ثم يتحقق من الجمع لكل فترة: اليوم الآتي (المستقبل) لا يدخل في أي
+    # فترة،
+    # وأفضل المنتجات تُستخرج من مسارات /product/، والمنتج المحذوف يظهر بـ slug بلا اسم.
     def test_aggregation_over_periods(self):
         from datetime import datetime, timedelta, timezone
         cookie, _ = self.login()
@@ -2050,6 +2256,7 @@ class AnalyticsReportTests(ServerCase):
         self.assertEqual(sum(d["views"] for d in quarter["daily"]), 28)
         self.assertEqual(quarter["totals"], week["totals"])
 
+    # صفحة الإدارة تحتوي شاشة الإحصاءات وتنبيه الخصوصية (بلا كوكيز ولا بيانات شخصية).
     def test_admin_page_has_the_statistics_screen(self):
         _, _, body = self.req("GET", "/admin/")
         html = body.decode()
@@ -2059,6 +2266,7 @@ class AnalyticsReportTests(ServerCase):
         self.assertIn("إحصاءات مجمّعة بلا ملفات تعريف ارتباط ولا بيانات شخصية", html)
 
 
+# عند بدء الخادم تُحذف الإحصاءات الأقدم من 400 يوم (ويبقى ما دونها) للحد من حجم القاعدة.
 class AnalyticsPruneTests(unittest.TestCase):
     def test_statistics_older_than_400_days_are_pruned_at_startup(self):
         data_dir = tempfile.mkdtemp(prefix="fakhama-test-")
@@ -2077,10 +2285,13 @@ class AnalyticsPruneTests(unittest.TestCase):
             ServerCase.stop_server.__func__(ServerCase)
 
 
+# ---- اختبارات إعدادات Google Analytics ----
+# يحوّل ترويسة CSP إلى قاموس {التوجيه: القيم}.
 def csp_of(resp) -> dict[str, str]:
     return {part.split(" ", 1)[0]: part.split(" ", 1)[1] if " " in part else "" for part in resp.getheader("Content-Security-Policy").split("; ")}
 
 
+# ثوابت: ما يجب ألا يظهر في الصفحة، ومضيفو Google المسموحون في CSP بعد تفعيل GA4، وصفحات المتجر العامة.
 # what a page must not contain while no GA4 ID / verification token is set (the storefront script itself may mention them)
 NO_GOOGLE_MARKUP = ('id="consentBanner"', 'id="cookieSettings"', '<meta name="google-site-verification"', "data-ga4-id",
                     'src="https://www.googletagmanager.com')
@@ -2088,10 +2299,14 @@ GA_HOSTS = ("https://*.google-analytics.com", "https://*.analytics.google.com", 
 STOREFRONT_PATHS = ("/", "/products", "/categories", "/category/curtains", "/product/wavy-03", "/about", "/contact", "/faq", "/no-such-page")
 
 
+# GA4 اختياري: بلا معرّف لا يتغير شيء إطلاقًا، ومعه تتسع CSP لصفحات المتجر فقط ويظهر شريط موافقة؛ ولا
+# تُحمَّل أداة Google قبل القبول.
 class GoogleSettingsTests(ServerCase):
     def put(self, body, cookie, csrf):
         return self.json("PUT", "/api/admin/settings", body, cookie=cookie, csrf=csrf)
 
+    # تحقق صارم من معرّف GA4 (G-XXXX) ورمز التحقق من Google، ورفض أي قيمة لا تُحفظ شيئًا؛ والتحديث الذي فيه
+    # قيمة خاطئة يفشل كاملًا.
     def test_settings_are_validated(self):
         cookie, csrf = self.login()
         for bad in ("UA-12345-1", "G-", "G-abc", "G-12", "G-<script>", "G-1234567890123456", "javascript:alert(1)", "G-AB12 CD", "AW-123456789"):
@@ -2114,6 +2329,7 @@ class GoogleSettingsTests(ServerCase):
         self.assertEqual((data["settings"]["ga4_id"], data["settings"]["google_site_verification"]), ("", ""))
         self.assertEqual(self.json("PUT", "/api/admin/settings", {"ga4_id": "G-ABCD1234"})[0], 401)
 
+    # بلا معرّف GA4 تكون CSP هي السياسة المشددة الأصلية حرفيًا، ولا يظهر أي أثر لـ Google في الصفحات.
     def test_nothing_changes_without_a_ga4_id(self):
         for path in STOREFRONT_PATHS + ("/privacy", "/terms", "/admin/", "/offline.html"):
             status, resp, body = self.req("GET", path, headers={"User-Agent": BROWSER_UA})
@@ -2130,6 +2346,9 @@ class GoogleSettingsTests(ServerCase):
         self.assertIn("إحصاءات الزيارات", privacy, "the first-party statistics are disclosed")
         self.assertIn("لا نستخدم ملفات تعريف ارتباط للتتبع أو للإعلانات", privacy)
 
+    # بعد ضبط GA4: CSP تسمح بمضيفي Google للصفحات العامة فقط (لا للإدارة ولا للصفحة القانونية)، ويظهر شريط
+    # الموافقة،
+    # ويبقى كل script بـ nonce. الموافقة الافتراضية "denied" ولا تُحمَّل gtag.js إلا بعد ضغط "قبول".
     def test_ga4_widens_the_csp_of_storefront_pages_only_and_adds_the_banner(self):
         cookie, csrf = self.login()
         self.assertEqual(self.put({"ga4_id": "G-TEST12345", "google_site_verification": "Verify_Token-1234567890"}, cookie, csrf)[0], 200)
@@ -2186,6 +2405,7 @@ class GoogleSettingsTests(ServerCase):
         for absent in NO_GOOGLE_MARKUP:
             self.assertNotIn(absent, body.decode(), absent)
 
+    # أمني: لو وُجدت في القاعدة قيمة خبيثة (حُقنت خارج الواجهة) فلا تصل إلى أي صفحة ولا تعدّل CSP.
     def test_a_bad_value_in_the_database_never_reaches_a_page(self):
         db_exec(self.data_dir, "UPDATE settings SET value='G-X\" onload=\"alert(1)' WHERE key='ga4_id'")
         db_exec(self.data_dir, "UPDATE settings SET value='\"><script>alert(1)</script>' WHERE key='google_site_verification'")
@@ -2200,6 +2420,8 @@ class GoogleSettingsTests(ServerCase):
             db_exec(self.data_dir, "UPDATE settings SET value='' WHERE key IN ('ga4_id','google_site_verification')")
 
 
+# ---- النسخ الاحتياطي والاستعادة والتصدير ----
+# يقرأ أرشيف zip من الذاكرة ويعيد {اسم الملف: المحتوى}.
 def zip_members(raw: bytes) -> dict[str, bytes]:
     import io
     import zipfile
@@ -2207,6 +2429,7 @@ def zip_members(raw: bytes) -> dict[str, bytes]:
         return {name: zf.read(name) for name in zf.namelist()}
 
 
+# عدد صفوف كل جدول في ملف قاعدة بيانات (للمقارنة مع manifest.json).
 def table_counts_of(db_file: Path) -> dict[str, int]:
     import sqlite3
     conn = sqlite3.connect(db_file)
@@ -2217,7 +2440,9 @@ def table_counts_of(db_file: Path) -> dict[str, int]:
         conn.close()
 
 
+# تنزيل نسخة احتياطية من لوحة الإدارة (zip يحوي القاعدة والصور وmanifest).
 class BackupDownloadTests(ServerCase):
+    # أمني: تنزيل النسخة وقائمتها يتطلبان المدير (401 دون ذلك).
     def test_backup_endpoints_need_the_admin(self):
         for path in ("/api/admin/backup.zip", "/api/admin/backups"):
             status, resp, body = self.req("GET", path)
@@ -2226,6 +2451,8 @@ class BackupDownloadTests(ServerCase):
             self.assertNotIn("zip", resp.getheader("Content-Type"))
         self.assertEqual(self.req("GET", "/api/admin/backup.zip", headers={"Cookie": "fakhama_admin=forged"})[0], 401)
 
+    # محتوى الأرشيف: store.db (ملف مستقل غير WAL) وmanifest.json (يتضمن sha256 وأعداد الجداول) وملفات
+    # uploads؛ ويُسجَّل التنزيل في التدقيق.
     def test_backup_zip_contents_headers_and_audit(self):
         import hashlib
         import sqlite3
@@ -2270,6 +2497,7 @@ class BackupDownloadTests(ServerCase):
         self.assertRegex(entry["detail"], r"^fakhama-backup-\d{8}-\d{6}\.zip: \d+ bytes, \d+ rows, 1 uploads$")
         self.assertFalse([p for p in Path(self.data_dir).iterdir() if p.name.startswith((".backup-", ".download-"))], "temporary files are removed")
 
+    # القائمة تعرض أنواع النسخ المعروفة فقط (قاعدة، صور، ما قبل الاستعادة) ولا تكشف مسارات الخادم.
     def test_backup_list_shows_archives_on_the_server(self):
         cookie, _ = self.login()
         status, data, _ = self.json("GET", "/api/admin/backups", cookie=cookie)
@@ -2285,13 +2513,17 @@ class BackupDownloadTests(ServerCase):
         self.assertNotIn(self.data_dir, json.dumps(data), "no server paths are exposed")
 
 
+# يشغّل أوامر app.py من سطر الأوامر (مثل export-sql وrestore) ويعيد النتيجة.
 def run_cli(data_dir: str, *args: str, port: int | None = None) -> subprocess.CompletedProcess:
     env = {k: v for k, v in os.environ.items() if k not in ("ADMIN_PASSWORD", "PORT", "HOST")}
     env.update({"DATA_DIR": data_dir, "PORT": str(port or free_port()), "HOST": "127.0.0.1"})
     return subprocess.run([sys.executable, "-I", str(ROOT / "app.py"), *args], capture_output=True, text=True, env=env, timeout=120, encoding="utf-8")
 
 
+# أمر export-sql: ملف SQL يمكن تحميله في قاعدة فارغة.
 class SqlExportTests(ServerCase):
+    # التصدير يحوي كل الجداول لكن بلا صفوف admins (لا تخرج تجزئة كلمة المرور)، ويُحمَّل سليمًا، والنص الخاص
+    # بحقن SQL يبقى نصًا.
     def test_export_sql_has_every_table_but_no_admin_rows(self):
         import sqlite3
         self.assertEqual(self.json("POST", "/api/contact", {"name": "عميلة 'O\"Brien'", "phone": "0551234567", "message": "سطر أول\nسطر ثانٍ; DROP TABLE x;--", "consent": True})[0], 201)
@@ -2350,6 +2582,7 @@ class SqlExportTests(ServerCase):
         finally:
             shutil.rmtree(out_dir, ignore_errors=True)
 
+    # بلا قاعدة بيانات يفشل الأمر برمز 1 ورسالة واضحة، وبعدد وسائط خاطئ برمز 2.
     def test_export_sql_without_a_database_fails_cleanly(self):
         empty = tempfile.mkdtemp(prefix="fakhama-test-")
         try:
@@ -2361,14 +2594,17 @@ class SqlExportTests(ServerCase):
             shutil.rmtree(empty, ignore_errors=True)
 
 
+# أمر restore: استعادة أرشيف النسخة الاحتياطية بأمان.
 class RestoreTests(ServerCase):
     ENV = {"CONTACT_LIMIT_PER_10MIN": "1000"}
 
+    # ينزّل أرشيف النسخة الاحتياطية الحالي بصلاحية المدير.
     def download_backup(self, cookie: str) -> bytes:
         status, _, raw = self.req("GET", "/api/admin/backup.zip", cookie=cookie)
         self.assertEqual(status, 200)
         return raw
 
+    # يعيد بناء أرشيف zip من قاموس ملفات (لتوليد أرشيفات معطوبة عمدًا).
     @staticmethod
     def rezip(members: dict[str, bytes], target: Path, extra: dict[str, bytes] | None = None) -> Path:
         import zipfile
@@ -2377,6 +2613,9 @@ class RestoreTests(ServerCase):
                 zf.writestr(name, data)
         return target
 
+    # أمني: أرشيفات معطوبة أو خبيثة (مسارات ../ وملفات غير متوقعة وأعداد أو مجموع تحقق غير مطابق وقاعدة
+    # ليست SQLite)
+    # تُرفض بالكامل دون تغيير شيء ودون نسخة أمان؛ وترفض الاستعادة أيضًا ما دام الخادم يعمل.
     def test_invalid_archives_are_refused_and_nothing_changes(self):
         import hashlib
         cookie, _ = self.login()
@@ -2424,6 +2663,9 @@ class RestoreTests(ServerCase):
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
+    # دورة كاملة: نسخة ثم تخريب البيانات ثم استعادة. تعود القاعدة والصور، ويُحذف الملف الغريب، وتُحفظ حالة
+    # ما قبل الاستعادة
+    # في أرشيف pre-restore أولًا، ثم يعمل الخادم بنفس البيانات.
     def test_restore_round_trip(self):
         import zipfile
         cookie, csrf = self.login()
@@ -2475,5 +2717,6 @@ class RestoreTests(ServerCase):
             shutil.rmtree(archive_dir, ignore_errors=True)
 
 
+# تشغيل الملف مباشرة يشغّل كل الاختبارات بتفاصيل أكثر.
 if __name__ == "__main__":
     unittest.main(verbosity=2)

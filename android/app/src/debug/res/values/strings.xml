@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف strings.xml (debug): يستبدل اسم التطبيق في نسخة الاختبار ليتميّز عن النسخة الرسمية على -->
+<!-- الجهاز. -->
 <resources>
     <string name="app_name">الفخامة (تجريبي)</string>
 </resources>

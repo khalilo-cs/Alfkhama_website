@@ -3,7 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- index.html: قالب (shell) الواجهة الأمامية لمتجر «الفخامة للأقمشة والستائر»، -->
+  <!-- وفيه HTML والأنماط CSS والسكربت JS معًا في ملف واحد. -->
+  <!-- يقدّمه app.py لكل صفحات المتجر (الرئيسية والمنتجات والأقسام والمنتج ومن نحن وتواصل والأسئلة)، -->
+  <!-- ويستبدل المحتوى الواقع بين علامتي main:start و main:end بما يولّده pages.py لكل صفحة. -->
+  <!-- السكربت يعمل في المتصفح: يجلب الكتالوج من /api/products و /api/categories والإعدادات من /api/store، -->
+  <!-- ويحفظ السلة والمفضلة في localStorage، ويرسل الطلب إلى /api/orders ورسالة التواصل إلى /api/contact. -->
+  <!-- ملفات مكمّلة: /assets/css/plus.css و /assets/js/plus.js (طبقة تحسينات)، -->
+  <!-- و /sw.js (عامل الخدمة)، و manifest.webmanifest (تثبيت الموقع كتطبيق). -->
   <meta name="theme-color" content="#fdfaf4">
+  <!-- وسوم SEO و Open Graph: قيم افتراضية، والخادم يكتبها من جديد لكل صفحة ليراها الزواحف ومعاينات الروابط. -->
   <meta id="metaDescription" name="description" content="الفخامة للأقمشة والستائر في جدة: تفصيل ستائر، ستائر رول وشرائح معدنية وكهربائية، وأقمشة متنوعة. زورونا في شارع المكرونة، مجمع الشرق، حي مشرفة.">
   <meta id="robotsMeta" name="robots" content="noindex,nofollow">
   <meta property="og:type" content="website">
@@ -13,14 +22,23 @@
   <meta id="ogImage" property="og:image" content="/assets/wavy-11.jpg">
   <meta id="ogUrl" property="og:url" content="">
   <title>الفخامة للأقمشة والستائر | تفصيل ستائر في جدة</title>
+  <!-- الأيقونات وملف manifest للتطبيق (PWA): الأيقونة الأولى مضمّنة كـ data URI فلا تحتاج طلب شبكة. -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%2315130f'/%3E%3Cpath d='M10 27V13l10 8 10-8v14' fill='none' stroke='%23ead6a6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link id="canonicalLink" rel="canonical" href="">
+  <!-- يضيف الصنف reveal-on لعنصر html فقط إذا كان المتصفح يدعم IntersectionObserver ولم يطلب المستخدم تقليل -->
+  <!-- الحركة، -->
+  <!-- وعندها فقط تُخفى العناصر الموسومة rv حتى تظهر بالتمرير (انظر قسم scroll reveal في الأنماط). -->
   <script>if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&'IntersectionObserver' in window)document.documentElement.classList.add('reveal-on')</script>
+  <!-- تحميل مسبق لخط العناوين (El Messiri) لتقليل وميض تغيّر الخط عند ظهور الصفحة. -->
   <link rel="preload" href="/assets/fonts/el-messiri-arabic-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- الأنماط الأساسية للصفحة. الكتل اللاحقة (luxe و multi-page shell و consent) تُطبَّق فوق الأولى وتعدّل -->
+  <!-- بعض قيمها. -->
   <style>
+    /* ---- 1) الأساسيات: المتغيرات (ألوان وخطوط) وإعادة الضبط والحاويات ---- */
+    /* متغيرات CSS تُستخدم في كل الأنماط عبر var(--اسم)؛ تغيير قيمة هنا يغيّر الموقع كله. */
     :root{
       --paper:#f8f6f0;--cream:#f3efe7;--white:#fffefa;--ink:#292720;--muted:#5d5b53;
       --line:#e7e2d8;--olive:#596654;--olive-dark:#44503f;--clay:#b77a5b;--sand:#e9e1d4;
@@ -37,6 +55,7 @@
     button{cursor:pointer}
     img{display:block;max-width:100%}
     .container{width:min(var(--max),calc(100% - 48px));margin-inline:auto}
+    /* ---- 2) الشريط العلوي (الإعلان) والترويسة: الشعار والقائمة والبحث وأزرار الأيقونات ---- */
     .demo-ribbon{display:flex;justify-content:center;align-items:center;gap:10px;background:#eee8db;color:#635a4d;padding:7px 18px;font-size:11px;letter-spacing:.01em;text-align:center}
     .demo-ribbon span{display:inline-flex;align-items:center;gap:7px}
     .demo-dot{width:6px;height:6px;border-radius:50%;background:var(--clay);display:inline-block}
@@ -69,6 +88,7 @@
     .counter.show{display:block}
     .menu-toggle{display:none}
     .search-toggle{display:none}
+    /* ---- 3) القسم الرئيسي (hero) وشريط المميزات ---- */
     .hero{position:relative;min-height:465px;display:flex;align-items:center;overflow:hidden;background-color:#e7dfd1;background-image:linear-gradient(to left,rgba(248,246,240,.98) 0%,rgba(248,246,240,.9) 27%,rgba(248,246,240,.35) 52%,rgba(248,246,240,0) 73%),url('/assets/wavy-11.jpg');background-size:cover;background-position:center}
     .hero:before{content:"";position:absolute;top:0;right:0;bottom:0;left:0;background:linear-gradient(180deg,rgba(34,31,25,.02),rgba(34,31,25,.04));pointer-events:none}
     .hero-content{position:relative;z-index:1;width:min(520px,49%);margin-right:max(calc((100vw - var(--max))/2),24px);padding:58px 0 60px}
@@ -91,6 +111,7 @@
     .benefit-icon{width:42px;height:42px;border-radius:14px;background:#eeece4;color:var(--olive);display:grid;place-items:center;flex:0 0 auto}
     .benefit-icon svg{width:20px;height:20px}
     .benefit b{display:block;font-size:11px;font-weight:700;margin-bottom:1px}.benefit small{font-size:9px;color:var(--muted);display:block;line-height:1.6}
+    /* ---- 4) رؤوس الأقسام وشبكة الأقسام (categories) ---- */
     .section{padding:82px 0}
     .section-head{display:flex;align-items:end;justify-content:space-between;gap:25px;margin-bottom:27px}
     .section-head .eyebrow{margin-bottom:9px}
@@ -107,6 +128,7 @@
     .category-card h3{font-size:19px;margin:0 0 3px;letter-spacing:-.03em}.category-card p{margin:0;font-size:10px;color:rgba(255,255,255,.8)}
     .round-arrow{width:35px;height:35px;flex:0 0 auto;border:1px solid rgba(255,255,255,.55);border-radius:50%;display:grid;place-items:center;transition:background .2s,color .2s}
     .round-arrow svg{width:15px;height:15px}.category-card:hover .round-arrow{background:white;color:var(--ink)}
+    /* ---- 5) المتجر: شريط الفلاتر وشبكة المنتجات وبطاقة المنتج ---- */
     .shop-section{background:var(--cream);border-block:1px solid #ece6dc}
     .toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:22px 0 20px;flex-wrap:wrap}
     .filter-list{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
@@ -134,6 +156,7 @@
     .no-results{grid-column:1/-1;text-align:center;padding:55px 15px;color:var(--muted);background:rgba(255,254,250,.65);border-radius:18px;font-size:13px}
     .no-results b{display:block;color:var(--ink);font-size:17px;margin-bottom:5px}
     .product-footnote{font-size:9px;color:#87837b;text-align:center;margin:23px 0 0}
+    /* ---- 6) شريط القصة والخدمات ودليل الستائر والأسئلة الشائعة وبطاقة التواصل والتذييل ---- */
     .story-band{padding:30px 0 0}
     .story-card{min-height:320px;border-radius:25px;overflow:hidden;position:relative;background:#aaa092;display:flex;align-items:center;background-image:linear-gradient(to left,rgba(42,39,32,.84) 0%,rgba(42,39,32,.64) 38%,rgba(42,39,32,.08) 76%),url('/assets/wavy-17.jpg');background-position:center 55%;background-size:cover;color:#fff}
     .story-content{width:min(500px,55%);padding:48px 54px}
@@ -186,6 +209,7 @@
     .footer-contact b{color:#f5efe3;font-weight:600}
     .footer-bottom{border-top:1px solid rgba(255,255,255,.13);padding-top:15px;display:flex;align-items:center;justify-content:space-between;gap:15px;color:#aead9f;font-size:9px}
     .footer-bottom p{margin:0}.footer-bottom .legal{display:flex;gap:16px;flex-wrap:wrap}
+    /* ---- 7) الطبقات: ظل الخلفية وسلة التسوق ونوافذ المنتج والطلب والتنبيه (toast) ---- */
     .overlay{position:fixed;top:0;right:0;bottom:0;left:0;background:rgba(32,31,27,.42);backdrop-filter:blur(3px);z-index:50;opacity:0;visibility:hidden;transition:opacity .25s,visibility .25s}
     .overlay.open{opacity:1;visibility:visible}
     .cart-drawer{position:fixed;z-index:51;top:0;left:0;width:min(430px,100%);height:100vh;height:100dvh;background:var(--paper);box-shadow:var(--shadow);transform:translateX(-105%);transition:transform .3s cubic-bezier(.2,.7,.2,1);display:flex;flex-direction:column}
@@ -224,7 +248,9 @@
     .form-disclaimer{font-size:9px;color:var(--muted);line-height:1.7;margin:10px 0 0}
     .toast{position:fixed;z-index:80;bottom:22px;left:50%;transform:translate(-50%,15px);background:#292c25;color:white;border-radius:999px;padding:11px 17px;font-size:11px;box-shadow:var(--shadow);opacity:0;visibility:hidden;transition:all .25s;max-width:min(90vw,460px);text-align:center}
     .toast.show{opacity:1;visibility:visible;transform:translate(-50%,0)}
+    /* صنف للنص المخصص لقارئات الشاشة فقط: موجود في الصفحة لكنه غير مرئي. */
     .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    /* ---- 8) نقاط التجاوب (responsive): تعديلات للشاشات المتوسطة (1080) والصغيرة (880) والهاتف (600) ---- */
     @media (max-width:1080px){
       .header-inner{gap:18px}.brand{min-width:145px}.main-nav{gap:15px;font-size:11px}.header-search{min-width:160px;max-width:195px}.header-actions{gap:3px}
       .hero-content{width:48%}.section{padding:70px 0}.guide-layout,.faq-layout{gap:38px}
@@ -262,6 +288,7 @@
       .modal-backdrop{padding:10px}.modal-box{border-radius:18px;max-height:94vh;max-height:94dvh}.product-modal-layout{grid-template-columns:1fr}.modal-image,.modal-image img{min-height:220px;height:240px}.modal-info{padding:20px}.modal-info h2{font-size:21px}.modal-info p{margin-bottom:8px}.modal-info .modal-price{font-size:17px;margin-bottom:10px}.order-modal{padding:24px 18px}.form-grid{grid-template-columns:1fr}.form-field.full{grid-column:auto}
     }
     .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    /* ---- 9) إتاحة الوصول: رابط التخطي، ومعرض صور المنتج، وخانة الموافقة في نموذج الطلب ---- */
     .skip-link{position:absolute;inset-inline-start:10px;top:-80px;z-index:100;background:#fffefa;color:var(--ink);padding:12px 18px;border-radius:10px;box-shadow:var(--shadow);font-weight:700}.skip-link:focus{top:10px}
     :where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{outline:3px solid var(--olive-dark);outline-offset:3px;border-radius:6px}
     main:focus{outline:none}
@@ -274,6 +301,7 @@
     .on-request{font-size:13px;font-weight:700;color:var(--olive-dark)}
     @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}}
   
+    /* حدٌّ أدنى لحجم الخط على الهاتف: كل القواعد التالية ترفع أحجام الخطوط الصغيرة حتى تبقى مقروءة. */
     /* readability-floor:start — phone screens: text is never smaller than 11px (labels) / 12px (copy) / 13px (names, prices) */
     @media (max-width:600px){
       .demo-ribbon{font-size:12px}
@@ -338,10 +366,14 @@
     }
     /* readability-floor:end */
     /* luxe:start — "night & champagne" identity layered over the base styles. Motion respects prefers-reduced-motion. */
+    /* ---- 10) الهوية الفاخرة (luxe): خط العناوين المحلي ومتغيرات الألوان الجديدة والحركات ---- */
+    /* ثلاث قواعد @font-face لخط Messiri (أوزان مختلفة) من ملفات محلية؛ عائلة الخط تُستخدم عبر المتغير */
+    /* --display. */
     @font-face{font-family:"Messiri";font-style:normal;font-weight:500 600;font-display:swap;src:url(/assets/fonts/el-messiri-arabic-600-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+0870-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FEFC}
     @font-face{font-family:"Messiri";font-style:normal;font-weight:700 900;font-display:swap;src:url(/assets/fonts/el-messiri-arabic-700-normal.woff2) format("woff2");unicode-range:U+0600-06FF,U+0750-077F,U+0870-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FEFC}
     @font-face{font-family:"Messiri";font-style:normal;font-weight:500 600;font-display:swap;src:url(/assets/fonts/el-messiri-latin-600-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC,U+2122,U+2212,U+FEFF,U+FFFD}
     @font-face{font-family:"Messiri";font-style:normal;font-weight:700 900;font-display:swap;src:url(/assets/fonts/el-messiri-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC,U+2122,U+2212,U+FEFF,U+FFFD}
+    /* تعريف جديد لمتغيرات الألوان يلغي القيم الأولى (ليلي وشمبانيا) لأنه يأتي لاحقًا في الملف. */
     :root{
       --night:#15130f;--night-2:#1e1a15;--night-3:#2a251e;--ivory:#fdfaf4;--paper:#f8f4ec;--cream:#f1eadd;--white:#fffdf8;
       --ink:#1b1915;--muted:#5d574c;--line:#e6dccb;
@@ -380,6 +412,7 @@
     .icon-btn:hover{background:#f1e7d4;color:var(--gold-ink)}
     .counter{background:var(--gold-grad);color:var(--night);font-weight:800;font-size:10px;box-shadow:0 4px 10px -3px rgba(168,128,63,.7)}
     .counter.bump{animation:bump .6s var(--spring)}
+    /* شريط تقدّم التمرير أعلى الصفحة (يحرّكه CSS إن دعم animation-timeline، وإلا يحرّكه السكربت). */
     .scroll-progress{position:fixed;top:0;right:0;left:0;height:3px;z-index:90;background:var(--gold-grad);transform-origin:100% 50%;transform:scaleX(var(--progress,0));pointer-events:none}
     @supports (animation-timeline:scroll()){.scroll-progress{animation:grow-x linear both;animation-timeline:scroll(root)}}
 
@@ -575,9 +608,12 @@
     .to-top svg{width:20px;height:20px}
 
     /* scroll reveal (only when JS opted in and motion is allowed) */
+    /* الإخفاء الأوّلي والظهور المتدرّج: يعمل فقط عند وجود reveal-on على عنصر html (انظر السكربت في أول */
+    /* head). */
     .reveal-on .rv:not(.in){opacity:0}
     .reveal-on .rv.in{animation:reveal .95s var(--ease) var(--rd,0s) both}
 
+    /* تعريف الحركات (keyframes) المستخدمة في الصفحة: الصعود والظهور والتوهج والنبض وغيرها. */
     @keyframes rise{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
     @keyframes reveal{from{opacity:0;translate:0 34px}to{opacity:1;translate:0 0}}
     @keyframes shimmer{from{background-position:130% 0}to{background-position:-130% 0}}
@@ -654,9 +690,11 @@
       .modal-info h2{font-size:24px}
       .to-top{left:14px;bottom:14px;width:46px;height:46px}
     }
+    /* الأجهزة التي لا تدعم التمرير بالمؤشر (اللمس): نلغي رفع البطاقة عند المرور. */
     @media (hover:none){.product-card:hover{--lift:0}.product-card:hover:before{opacity:0}}
     @media (prefers-reduced-motion:reduce){.hero h1{animation:none;background:none;-webkit-text-fill-color:currentColor;color:var(--ivory)}.hero:before{animation:none}.product-card{transform:none}}
 
+    /* ---- 11) قالب الصفحات المتعددة: قائمة الروابط والبحث وأهداف اللمس بحجم 44px على الأقل ---- */
     /* multi-page shell: six-link menu with the current page marked, search form, 44px touch targets */
     .main-nav a{display:inline-flex;align-items:center;min-height:44px;padding-block:0}
     .main-nav a:after{bottom:6px}
@@ -712,6 +750,7 @@
       .contact-actions .btn{min-height:46px}
     }
     .noscript-note a{text-decoration:underline;font-weight:700}
+    /* ---- 12) شريط موافقة التحليلات (Google Analytics): يظهر فقط حين يضبط المالك المعرّف ---- */
     /* consent:start — optional Google Analytics consent banner (rendered by the server only when the owner set a GA4 ID).
        Non-modal region pinned to the bottom; the page reserves its height so focused content is never hidden behind it. */
     html.has-consent{scroll-padding-bottom:calc(var(--consent-h,0px) + 16px)}
@@ -742,8 +781,10 @@
     /* consent:end */
     /* luxe:end */
 </style>
+  <!-- ملف أنماط إضافي من نفس النطاق، وتحميل مسبق لسكربت التحسينات الذي يُحقن في آخر الصفحة. -->
   <link rel="stylesheet" href="/assets/css/plus.css">
   <link rel="preload" href="/assets/js/plus.js" as="script">
+  <!-- بيانات منظّمة JSON-LD (نوع Store) تساعد محركات البحث على فهم نشاط المتجر. -->
   <script id="localBusinessSchema" type="application/ld+json">
   {
     "@context":"https://schema.org",
@@ -756,9 +797,13 @@
   </script>
 </head>
 <body data-page="home">
+  <!-- ---- بنية الصفحة: السمة data-page على body تحدد نوع الصفحة، والسكربت يقرؤها ---- -->
   <div class="scroll-progress" aria-hidden="true"></div>
+  <!-- رابط «تخطي إلى المحتوى» للوحة المفاتيح وقارئات الشاشة؛ يظهر عند التركيز فقط. -->
   <a class="skip-link" href="#main">تخطي إلى المحتوى الرئيسي</a>
+  <!-- رسالة تظهر فقط إذا كان JavaScript معطّلًا، لأن السلة وإرسال الطلب يعتمدان عليه. -->
   <noscript><p class="noscript-note">السلة وإرسال الطلبات تحتاج إلى تفعيل JavaScript. يمكنك تصفّح <a href="/products">صفحة المنتجات</a> أو التواصل مع المتجر هاتفيًا.</p></noscript>
+  <!-- ---- الشريط العلوي: إعلان قصير وروابط سريعة ---- -->
   <aside class="top-notices" aria-label="معلومات المتجر">
   <div class="announcement">
     <div class="container announcement-inner">
@@ -767,19 +812,24 @@
     </div>
   </div>
   </aside>
+  <!-- ---- الترويسة: الشعار والقائمة الرئيسية والبحث وأزرار المفضلة والسلة ---- -->
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand" href="/" aria-label="الفخامة للأقمشة والستائر — الرئيسية">
         <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V6l8 6 8-6v12"/><path d="M8 18v-5m8 5v-5"/></svg></span>
         <span><span class="brand-name" data-store-name>الفخامة للأقمشة والستائر</span><span class="brand-tagline" data-store-tagline>تفصيل ستائر وأقمشة في جدة</span></span>
       </a>
+      <!-- القائمة الرئيسية؛ يضع السكربت aria-current على رابط الصفحة الحالية (دالة markNav). -->
       <nav class="main-nav" id="mainNav" aria-label="التنقل الرئيسي">
         <a href="/">الرئيسية</a><a href="/products">المنتجات</a><a href="/categories">الأقسام</a><a href="/about">من نحن</a><a href="/faq">الأسئلة الشائعة</a><a href="/contact">تواصل معنا</a>
       </nav>
+      <!-- نموذج بحث حقيقي (GET إلى /products)، فيعمل بدون JavaScript؛ ومعه يصفّي السكربت الشبكة أثناء -->
+      <!-- الكتابة. -->
       <form class="header-search" id="searchBar" role="search" aria-label="البحث في المنتجات" action="/products" method="get">
         <label for="searchInput" class="search-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.2 4.2"/></svg><span class="sr-only">ابحث في المنتجات</span></label><input id="searchInput" name="q" type="search" maxlength="100" placeholder="ابحث عن ستارة، رول، قماش…" autocomplete="off" enterkeyhint="search">
         <div class="search-suggest" id="searchSuggest" role="listbox" aria-label="اقتراحات البحث" hidden></div><span class="sr-only" id="searchStatus" role="status" aria-live="polite"></span>
       </form>
+      <!-- أزرار الترويسة: البحث (للشاشات الصغيرة) والمفضلة والسلة وقائمة الهاتف. -->
       <div class="header-actions">
         <button class="icon-btn search-toggle" id="searchToggle" aria-label="فتح البحث" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.2 4.2"/></svg></button>
         <button class="icon-btn" id="favoritesToggle" aria-label="عرض المفضلة" title="المفضلة"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 8.8c0 5.1-8.8 10.1-8.8 10.1S3.2 13.9 3.2 8.8a4.5 4.5 0 0 1 8.1-2.7.9.9 0 0 0 1.4 0 4.5 4.5 0 0 1 8.1 2.7Z"/></svg><i class="counter" id="favCount">0</i></button>
@@ -789,8 +839,12 @@
     </div>
   </header>
 
+  <!-- المحتوى الرئيسي. العلامتان main:start و main:end وfaq:start و faq:end يبحث عنهما الخادم (app.py و -->
+  <!-- pages.py) -->
+  <!-- ليستبدل ما بينهما بمحتوى كل صفحة؛ فلا تحذفهما ولا تغيّر كتابتهما. -->
   <main id="main" tabindex="-1">
 <!--main:start-->
+    <!-- ---- القسم الرئيسي (hero): العنوان والنص وأزرار الدعوة لاتخاذ إجراء ---- -->
     <section class="hero" id="home" aria-labelledby="heroTitle">
       <img class="hero-bg" src="/assets/wavy-11.jpg" srcset="/assets/wavy-11-t.jpg 600w, /assets/wavy-11.jpg 1200w" sizes="100vw" width="1200" height="669" alt="" fetchpriority="high" decoding="async">
       <div class="hero-content">
@@ -813,6 +867,7 @@
       </svg>
     </section>
 
+    <!-- ---- شريط المميزات (أربع نقاط مختصرة) ---- -->
     <section class="benefits" aria-label="مميزات التسوق">
       <div class="container benefits-grid">
         <div class="benefit"><span class="benefit-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v11H3zM14 11h4l3 3v4h-7z"/><circle cx="7.5" cy="19" r="1.6"/><circle cx="18" cy="19" r="1.6"/></svg></span><span><b>تفصيل حسب المقاس</b><small>اختر القماش والتصميم المناسب</small></span></div>
@@ -822,6 +877,7 @@
       </div>
     </section>
 
+    <!-- ---- الأقسام: الشبكة تُملأ من السكربت (renderCategoryCards) بعد وصول الكتالوج ---- -->
     <section class="section" id="categories">
       <div class="container">
         <div class="section-head">
@@ -832,22 +888,26 @@
       </div>
     </section>
 
+    <!-- ---- المتجر: الفلاتر والترتيب وشبكة المنتجات التي يرسمها السكربت ---- -->
     <section class="section shop-section" id="shop">
       <div class="container">
         <div class="section-head">
           <div><span class="eyebrow">تفصيل وخيارات متنوعة</span><h2>ستائر وأقمشة لمنزلك</h2><p>ابحث بين الستائر المفصّلة والرول والشرائح والأقمشة. الأسعار تُؤكَّد بحسب المقاس والخامة.</p></div>
           <a class="text-link" href="#guide">اقرأ دليل الاختيار <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M19 12H5m7-7-7 7 7 7"/></svg></a>
         </div>
+        <!-- شريط الأدوات: أزرار الأقسام وعدد النتائج وخيارا الترتيب و«المتوفر فقط». -->
         <div class="toolbar">
           <div class="filter-list" id="filterList" role="group" aria-label="تصفية حسب القسم"><button class="filter-chip active" data-filter="all">الكل</button></div>
           <span class="result-count" id="resultCount" aria-live="polite"></span>
           <div class="filter-extras"><label class="toggle-chip"><input type="checkbox" id="stockOnly"><span>المتوفر فقط</span></label><button type="button" class="clear-filters" id="clearFilters" data-clear-filters hidden>مسح التصفية</button></div><label><span class="sr-only">ترتيب المنتجات</span><select class="sort-select" id="sortSelect"><option value="featured">ترتيب مقترح</option><option value="newest">الأحدث أولًا</option><option value="low">السعر: الأقل أولًا</option><option value="high">السعر: الأعلى أولًا</option><option value="name">الاسم: أ إلى ي</option></select></label>
         </div>
+        <!-- شبكة المنتجات؛ aria-live ليعلن قارئ الشاشة عن تغيّر النتائج. -->
         <div class="product-grid" id="productGrid" aria-live="polite"></div>
         <p class="product-footnote" id="productFootnote">المنتجات والأسعار والمخزون تُدار من لوحة التحكم، ويؤكد المتجر تفاصيل التوصيل قبل الطلب.</p>
       </div>
     </section>
 
+    <!-- ---- شريط القصة ---- -->
     <section class="story-band" aria-label="ستائر وأقمشة مفصلة حسب الطلب">
       <div class="container">
         <div class="story-card">
@@ -856,6 +916,7 @@
       </div>
     </section>
 
+    <!-- ---- الخدمات ---- -->
     <section class="section services" id="services">
       <div class="container">
         <div class="section-head"><div><span class="eyebrow">حلول الستائر في مكان واحد</span><h2>من اختيار القماش إلى التفصيل</h2><p>استكشف أنواع الستائر والأقمشة، وتواصل مع المتجر لتأكيد المقاسات والخامات والخدمات المتاحة.</p></div></div>
@@ -867,6 +928,7 @@
       </div>
     </section>
 
+    <!-- ---- دليل الستائر: أربع خطوات للقياس والاختيار ---- -->
     <section class="section guide-section" id="guide">
       <div class="container guide-layout">
         <div class="guide-intro"><span class="eyebrow">دليل الستائر</span><h2>قياس أدق،<br>وإطلالة أجمل.</h2><p>اختيار الستارة يبدأ من قياس النافذة ومعرفة مستوى الإضاءة والخصوصية الذي تفضله. هذه نقاط تساعدك على تجهيز معلوماتك قبل تفصيل الستارة.</p><a class="text-link" href="#faq">لديك سؤال؟ <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M19 12H5m7-7-7 7 7 7"/></svg></a></div>
@@ -879,6 +941,7 @@
       </div>
     </section>
 
+    <!-- ---- الأسئلة الشائعة؛ مصدرها الوحيد في pages.py وتُعرض هنا بين علامتي faq ---- -->
     <section class="section" id="faq">
       <div class="container faq-layout">
         <div class="faq-intro"><span class="eyebrow">قبل تفصيل الستارة</span><h2>إجابات<br>على أسئلتك.</h2><p>راجع المعلومات الأساسية عن القياس والخامات والطلب، ثم تواصل مع المتجر لتأكيد الخيارات المتاحة.</p></div>
@@ -894,6 +957,7 @@
       </div>
     </section>
 
+    <!-- ---- التواصل: زر يفتح واتساب أو الاتصال بحسب بيانات المتجر ---- -->
     <section class="contact-section" id="contact">
       <div class="container">
         <div class="contact-card">
@@ -905,6 +969,7 @@
 <!--main:end-->
   </main>
 
+  <!-- ---- التذييل: روابط التسوق والمعلومات وبيانات المتجر (تُملأ من /api/store) ---- -->
   <footer class="site-footer">
     <div class="container">
       <div class="footer-top">
@@ -918,6 +983,8 @@
     </div>
   </footer>
 
+  <!-- ---- الطبقات المنبثقة: ظل الخلفية، سلة التسوق، نافذة تفاصيل المنتج، نافذة الطلب ---- -->
+  <!-- السلة مغلقة بالسمة inert فلا يصل إليها التركيز ولا قارئ الشاشة حتى تُفتح (انظر syncInert في السكربت). -->
   <div class="overlay" id="drawerOverlay"></div>
   <div class="cart-drawer" id="cartDrawer" role="dialog" aria-modal="true" aria-label="سلة التسوق" inert>
     <div class="drawer-head"><h2>سلة التسوق <span id="drawerItemCount" style="font-size:12px;color:var(--muted);font-weight:500"></span></h2><button class="close-btn" id="cartClose" aria-label="إغلاق السلة"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
@@ -925,19 +992,31 @@
     <div class="drawer-bottom"><div class="subtotal-row"><span id="subtotalLabel">المجموع قبل التوصيل</span><span id="cartSubtotal">٠ ر.س</span></div><p class="pending-note" id="pendingNote" hidden></p><div class="subtotal-row sub-fee"><span>رسوم التوصيل</span><span id="cartDeliveryFee">تُحدد</span></div><div class="subtotal-row total"><span>الإجمالي التقديري</span><span id="cartTotal">٠ ر.س</span></div><p class="shipping-note" id="shippingNote">رسوم التوصيل — تُحدد بعد معرفة المدينة وتأكيد الطلب.</p><button class="btn btn-primary" id="checkoutBtn">أكمل الطلب</button><p class="cart-disclaimer">يُسجّل الطلب للمراجعة؛ لا يوجد تحصيل إلكتروني في هذا الإصدار.</p></div>
   </div>
 
+  <!-- نافذة تفاصيل المنتج السريعة؛ محتواها يُبنى بالسكربت داخل productModalContent. -->
   <div class="modal-backdrop" id="productModal" role="dialog" aria-modal="true" aria-label="تفاصيل المنتج"><div class="modal-box"><button class="modal-close" data-close-modal aria-label="إغلاق"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button><div id="productModalContent"></div></div></div>
+  <!-- نافذة إتمام الطلب: ملخص السلة ثم بيانات العميل ثم رسالة التأكيد. -->
   <div class="modal-backdrop" id="orderModal" role="dialog" aria-modal="true" aria-labelledby="orderTitle"><div class="modal-box order-modal"><button class="modal-close" data-close-modal aria-label="إغلاق"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg></button><ol class="order-steps" id="orderSteps" aria-label="مراحل الطلب"><li class="done"><span aria-hidden="true">١</span>السلة</li><li aria-current="step"><span aria-hidden="true">٢</span>بياناتك</li><li><span aria-hidden="true">٣</span>التأكيد</li></ol><h2 id="orderTitle" tabindex="-1">بيانات الطلب</h2><div id="orderBody"><p class="order-intro">أدخل بيانات التواصل ليراجع المتجر طلبك ويؤكد معك المقاس والسعر.</p><div class="order-summary" id="orderSummary"></div><div class="form-alert" id="orderAlert" role="alert" tabindex="-1" hidden></div><form id="orderForm" novalidate><div class="form-grid"><div class="form-field"><label for="customerName">الاسم</label><input id="customerName" name="name" required autocomplete="name" placeholder="اسمك الكامل" aria-describedby="customerNameError"><p class="field-error" id="customerNameError" hidden></p></div><div class="form-field"><label for="customerPhone">رقم الجوال</label><input id="customerPhone" name="phone" type="tel" inputmode="tel" required autocomplete="tel" placeholder="05xxxxxxxx" aria-describedby="customerPhoneHint customerPhoneError"><small class="field-hint" id="customerPhoneHint">مثال: 0551234567</small><p class="field-error" id="customerPhoneError" hidden></p></div><div class="form-field full"><label for="customerCity">المدينة</label><input id="customerCity" name="city" required autocomplete="address-level2" placeholder="مثال: الرياض" aria-describedby="customerCityError"><p class="field-error" id="customerCityError" hidden></p></div><div class="form-field full"><label for="customerAddress">العنوان (اختياري)</label><input id="customerAddress" name="address" autocomplete="street-address" maxlength="250" placeholder="الحي والشارع"></div><div class="form-field full"><label for="customerNote">ملاحظة (اختياري)</label><textarea id="customerNote" name="note" maxlength="1000" placeholder="موعد مناسب أو استفسار عن المنتج"></textarea></div></div><label class="consent"><input type="checkbox" id="orderConsent" name="consent" required aria-describedby="orderConsentError"> <span>أوافق على <a href="/privacy" target="_blank" rel="noopener">سياسة الخصوصية<span class="sr-only"> (تفتح في نافذة جديدة)</span></a> وعلى استخدام بياناتي لمعالجة طلبي.</span></label><p class="field-error consent-error" id="orderConsentError" hidden></p><button class="btn btn-primary" type="submit">تأكيد الطلب وتسجيله</button><p class="form-disclaimer">يُحفظ الطلب ليتمكن المتجر من مراجعته والتواصل معك. لا يتم تحصيل مبلغ إلكتروني.</p></form></div><div class="order-done" id="orderDone" hidden></div></div></div>
+<!-- موضع شريط الموافقة: يضعه الخادم بين العلامتين فقط حين يكون معرّف التحليلات مضبوطًا. -->
 <!--consent:start-->
 <!--consent:end-->
+  <!-- رسالة منبثقة قصيرة (toast) تُعرض من الدالة toast(). -->
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <!-- ---- السكربت الرئيسي: منطق المتجر كله (الكتالوج والسلة والطلب والبحث والمعرض) ---- -->
   <script>
+// واجهة المتجر العامة: الكتالوج والمخزون والطلب تأتي من الخادم (app.py مع قاعدة SQLite)، وهذا السكربت يعرضها
+// فقط.
+// يعمل على كل صفحات القالب، وكل بحث عن عنصر يتسامح مع غيابه لأن الصفحات تختلف في محتواها.
 // Public storefront: live catalog, inventory and checkout are served by app.py + SQLite.
 // The same script runs on every page of the shell. body[data-page] names the page (home, products, categories, category,
 // product, about, contact, faq, notfound); every lookup tolerates the elements a page does not have.
+// ---- 1) الحالة العامة: إعدادات المتجر والمنتجات والأقسام ----
+// STORE قيم افتراضية تُدمج فوقها إعدادات /api/store في applyStoreSettings؛ catalogState يمنع عرض منتجات أو
+// أسعار مختلقة.
 let STORE = {name:'الفخامة للأقمشة والستائر',tagline:'تفصيل ستائر وأقمشة في جدة',city:'جدة',phone:'+966 57 648 6491',whatsapp:'',address:'شارع المكرونة، مجمع الشرق، حي مشرفة، جدة 23444',map_url:'https://maps.app.goo.gl/kn2kxuPujQT9raLG7?g_st=awb',country:'المملكة العربية السعودية',delivery_fee:0,delivery_note:'تفصيل الستائر حسب المقاس؛ تواصل مع المتجر لتأكيد التوصيل والتركيب بحسب موقعك.',site_ready:false,seo_title:'الفخامة للأقمشة والستائر | تفصيل ستائر في جدة',seo_description:'الفخامة للأقمشة والستائر في جدة: تفصيل ستائر، ستائر رول وشرائح معدنية وكهربائية، وأقمشة متنوعة. زورونا في شارع المكرونة، مجمع الشرق، حي مشرفة.',hero_title:'ستائر تكمّل أناقة بيتك.',hero_copy:'من الأقمشة إلى الستائر المفصّلة، اختَر ما يناسب نافذتك وذوقك. تفصيل ستائر، رول، شرائح معدنية وكهربائية في جدة.'};
 let PRODUCTS = [], catalogState = 'loading'; // 'loading' | 'ready' | 'error' — never show invented products or prices
 let CATEGORIES = [{slug:'curtains',name:'ستائر تفصيل'},{slug:'roller',name:'ستائر رول'},{slug:'blinds',name:'ستائر شرائح معدنية'},{slug:'electric',name:'ستائر كهربائية'},{slug:'fabrics',name:'أقمشة الستائر'}];
+// أيقونات SVG جاهزة تُدرج في القوالب النصية (ثابتة وليست من مدخلات المستخدم).
 const icons = {
   heart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 8.8c0 5.1-8.8 10.1-8.8 10.1S3.2 13.9 3.2 8.8a4.5 4.5 0 0 1 8.1-2.7.9.9 0 0 0 1.4 0 4.5 4.5 0 0 1 8.1 2.7Z"/></svg>',
   arrow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5m7-7-7 7 7 7"/></svg>',
@@ -945,17 +1024,23 @@ const icons = {
   chevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
   zoom:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.2 4.2M10.8 8v5.6M8 10.8h5.6"/></svg>'
 };
+// ---- 2) أدوات مساعدة: تنسيق الأسعار والأرقام وبناء الأسعار وعناصر DOM ----
 const fmt = value => new Intl.NumberFormat('ar-SA',{style:'currency',currency:'SAR',maximumFractionDigits:0}).format(value);
 const amount = value => new Intl.NumberFormat('ar-SA',{maximumFractionDigits:0}).format(value);
 // price 0 = made-to-order item: the price is confirmed with the shop after measuring (shown as "السعر حسب الطلب")
 const onRequest = p => !(Number(p.price)>0);
 const priceHtml = p => onRequest(p)?'<span class="on-request">السعر حسب الطلب</span>':`${amount(p.price)} <small>ر.س</small>`;
+// اختصارات للبحث في DOM، ودالة on تضيف مستمعًا فقط إذا كان العنصر موجودًا.
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const on = (el,type,fn,opts) => {if(el)el.addEventListener(type,fn,opts)};
 const setText = (selector,text) => {const el=$(selector);if(el)el.textContent=text};
 const countAr=(n,unit='product')=>{n=Number(n)||0;const w=unit==='piece'?['قطعة واحدة','قطعتان','قطع','قطعة','لا توجد قطع']:['منتج واحد','منتجان','منتجات','منتجًا','لا توجد منتجات'];if(!n)return w[4];if(n===1)return w[0];if(n===2)return w[1];return `${amount(n)} ${n%100>=3&&n%100<=10?w[2]:w[3]}`};
+// تهريب HTML: كل نص قادم من الكتالوج أو من المستخدم يمرّ من هنا قبل إدراجه في innerHTML (حماية من XSS).
 const esc = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// ---- 3) البحث العربي: تطبيع النص ومطابقة الكلمات وترتيب الصلة وتمييز النتائج ----
+// تطبيع النص: إزالة التشكيل والتطويل، وتوحيد الألف والياء والتاء المربوطة، وتحويل الأرقام العربية إلى لاتينية،
+// وتعني المطابقة أن كل كلمة في عبارة البحث يجب أن توجد في بيانات المنتج (الاسم والقسم والوصف والرمز).
 // Arabic-aware search shared by the product grid and the header suggestions: diacritics and tatweel are ignored, alef / yaa / taa-marbuta
 // variants match each other, Arabic-Indic digits equal Latin ones, and every word of the query must match somewhere in the product.
 const AR_MARKS=/[\u064B-\u065F\u0670\u0640]/g,AR_DIGITS='٠١٢٣٤٥٦٧٨٩',FA_DIGITS='۰۱۲۳۴۵۶۷۸۹';
@@ -964,13 +1049,17 @@ const normAr=s=>toLatin(String(s??'').toLowerCase().replace(AR_MARKS,'').replace
 const searchTokens=term=>normAr(term).split(' ').filter(Boolean).slice(0,6);
 const hayOf=p=>p._hay||(p._hay=normAr(`${p.name} ${p.categoryName||p.category_name||''} ${p.description||''} ${p.sku||''}`));
 const matchesTerm=(p,tokens)=>!tokens.length||tokens.every(t=>hayOf(p).includes(t));
+// تُجرَّب العبارة كاملة أولًا ثم، إن لم تظهر نتيجة، كل كلمة على حدة.
 // The whole phrase first (what the server-rendered /products?q= list does); only when that finds nothing, products holding every word.
 function matchProducts(list,term){
   const tokens=searchTokens(term);if(!tokens.length)return list;
   const exact=list.filter(p=>hayOf(p).includes(tokens.join(' ')));
   return exact.length||tokens.length<2?exact:list.filter(p=>matchesTerm(p,tokens));
 }
+// درجة الصلة: كلمة تبدأ بها الاسم تحصل على أعلى وزن، ثم وجودها في الاسم، ثم في القسم.
 const relevance=(p,tokens)=>{const n=normAr(p.name),c=normAr(p.categoryName||'');return tokens.reduce((s,t)=>s+(n.startsWith(t)?4:n.includes(t)?3:c.includes(t)?2:1),0)};
+// تمييز كلمة البحث داخل النص: كل حرف يُحوَّل إلى فئة أحرف مكافئة (مثل ا/أ/إ) مع السماح بالتشكيل بين الحروف،
+// وتُهرَّب رموز التعبير النمطي الخاصة حتى لا يُفسَّر مدخل المستخدم كنمط؛ والنص الناتج يمرّ بـ esc قبل <mark>.
 const CHAR_CLASS={'ا':'[اأإآٱ]','ي':'[يىئ]','ه':'[هة]','و':'[وؤ]'};
 function highlightHtml(text,term){
   const tokens=searchTokens(term),src=String(text??'');if(!tokens.length)return esc(src);
@@ -980,27 +1069,38 @@ function highlightHtml(text,term){
   while((m=re.exec(src))){if(!m[0]){re.lastIndex++;continue}out+=esc(src.slice(last,m.index))+'<mark>'+esc(m[0])+'</mark>';last=m.index+m[0].length}
   return out+esc(src.slice(last));
 }
+// تهريب قيمة تُدرج داخل محدّد CSS أو داخل url(...)، حتى لا تكسر علامات الاقتباس أو الأقواس القاعدة.
 const cssq=v=>window.CSS&&CSS.escape?CSS.escape(v):String(v).replace(/["\\]/g,'\\$&');
 const cssUrl=u=>`url("${encodeURI(String(u||'')).replace(/["'()\\]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase())}")`;
+// ---- 4) الصور: ظهور تدريجي بعد التحميل ----
 // Images fade in once decoded (a shimmer shows meanwhile); an image that is already complete is left alone.
 function prepImages(root){
   (root||document).querySelectorAll('img.product-image,.category-card>img,#galleryMain').forEach(img=>{if(img.classList.contains('fade-img')||(img.complete&&img.naturalWidth))return;img.classList.add('fade-img')});
 }
+// الحدثان load و error لا يصعدان في DOM، لذلك يُستمع إليهما في مرحلة الالتقاط (المعامل true) لكل الصور.
 ['load','error'].forEach(type=>document.addEventListener(type,e=>{const t=e.target;if(t instanceof HTMLImageElement&&t.classList.contains('fade-img'))t.classList.add('is-loaded')},true));
+// ---- 5) الحالة المحفوظة وسياق الصفحة: السلة والمفضلة في localStorage وقراءة معاملات العنوان ----
+// قراءة آمنة من localStorage: تعيد القيمة الافتراضية إذا كان التخزين محجوبًا أو البيانات تالفة.
 const safeLoad = (key,fallback) => {try{const value=JSON.parse(localStorage.getItem(key));return value??fallback}catch{return fallback}};
 const calmMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const PAGE = document.body.dataset.page||'home';
 const PAGE_CATEGORY = PAGE==='category'?(document.body.dataset.category||''):'';
+// مسار الصفحة التي رسمها الخادم، لنعود إليه بعد إغلاق نافذة المنتج السريعة.
 const PAGE_PATH = location.pathname; // the page the server rendered (quick view may push /product/<slug> on top of it)
 const QUERY = new URLSearchParams(location.search);
+// السلة والمفضلة تُحفظان على جهاز الزائر فقط (لا حساب مستخدم)، ويُتحقق أنهما مصفوفتان.
 let cart=safeLoad('fakhama-cart-v1',[]), favorites=safeLoad('fakhama-favorites-v1',[]), toastTimer;
 if(!Array.isArray(cart))cart=[];if(!Array.isArray(favorites))favorites=[];
+// حالة الفلاتر تُقرأ من عنوان الصفحة ليمكن مشاركة رابط قائمة مصفّاة؛ ويُتحقق من اسم القسم بتعبير نمطي ويُقصّ نص
+// البحث بـ 100 حرف.
 let activeFilter=PAGE_CATEGORY||(PAGE==='products'&&/^[\w\u0600-\u06FF-]{1,80}$/.test(QUERY.get('cat')||'')?QUERY.get('cat'):'all'), showFavorites=PAGE==='products'&&QUERY.get('favorites')==='1', searchTerm=PAGE==='products'?(QUERY.get('q')||'').trim().slice(0,100):'';
 const productGrid=$('#productGrid');
+// فلاتر الترتيب والمتوفر فقط تُحفظ في العنوان في صفحتي المنتجات والقسم.
 // products and category pages keep sort / availability (and on /products the category) in the address, so a filtered list can be shared
 const LIST_PAGE=PAGE==='products'||PAGE==='category';
 let stockOnly=LIST_PAGE&&QUERY.get('stock')==='1',undoLine=null,undoTimer=0;
 {const sel=$('#sortSelect'),want=QUERY.get('sort');if(LIST_PAGE&&sel&&want&&[...sel.options].some(o=>o.value===want))sel.value=want;const so=$('#stockOnly');if(so)so.checked=stockOnly}
+// إذا جاءت الصفحة ببطاقات مرسومة من الخادم نتركها حتى يصل الكتالوج الحي (لمحركات البحث وبدون JavaScript).
 // Sub-pages arrive with server-rendered cards (no-JS / search-engine fallback): keep them until the live catalogue is here.
 // (The server does not know the visitor's favourites, so /products?favorites=1 waits for the catalogue instead.)
 const serverGrid=Boolean(productGrid&&productGrid.children.length)&&!showFavorites;
@@ -1010,8 +1110,11 @@ const categoryUrl=slug=>'/category/'+encodeURIComponent(slug);
 const isFav=id=>favorites.some(x=>String(x)===String(id));
 const favoritesInPlace=()=>Boolean($('#shop')&&$('#filterList'));
 
+// ---- 6) رسائل التنبيه وحفظ الحالة ----
 function toast(message){const el=$('#toast');if(!el)return;el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3200)}
 function saveState(){try{localStorage.setItem('fakhama-cart-v1',JSON.stringify(cart));localStorage.setItem('fakhama-favorites-v1',JSON.stringify(favorites))}catch{}}
+// ---- 7) عرض الأقسام والفلاتر وبطاقات المنتجات ----
+// نعرض الأقسام التي فيها منتجات فعلًا فقط، فلا أقسام فارغة ولا صور بديلة.
 // Only categories that really have products are shown (no empty sections, no placeholder imagery).
 const visibleCategories=()=>CATEGORIES.filter(c=>PRODUCTS.some(p=>p.category===c.slug));
 function renderCategoryCards(){
@@ -1024,6 +1127,8 @@ function renderFooterCategories(){
   box.innerHTML=visibleCategories().slice(0,5).map(c=>`<a href="${esc(categoryUrl(c.slug))}">${esc(c.name)}</a>`).join('');
 }
 const chipHtml=(slug,name)=>`<button type="button" class="filter-chip${activeFilter===slug?' active':''}" data-filter="${esc(slug)}" aria-pressed="${activeFilter===slug}">${esc(name)}</button>`;
+// يبني أزرار الفلتر من الأقسام الحية؛ وإن تطابقت مع المرسومة من الخادم تبقى كما هي حفاظًا على تركيز لوحة
+// المفاتيح.
 function renderCategoryFilters(){
   const root=$('#filterList');if(!root||catalogState!=='ready')return; // until then keep the static / server-rendered chips
   const cats=visibleCategories();if(activeFilter!=='all'&&activeFilter!==PAGE_CATEGORY&&!cats.some(c=>c.slug===activeFilter))activeFilter='all';const have=$$('#filterList .filter-chip').map(b=>b.dataset.filter+'|'+b.textContent.trim()).join(),want=['all|الكل',...cats.map(c=>c.slug+'|'+c.name)].join();
@@ -1031,10 +1136,12 @@ function renderCategoryFilters(){
   root.innerHTML=chipHtml('all','الكل')+cats.map(c=>chipHtml(c.slug,c.name)).join('');
 }
 function syncChips(){$$('#filterList .filter-chip').forEach(b=>{const on=b.dataset.filter===activeFilter;b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on))})}
+// يبني HTML بطاقة منتج واحدة؛ كل القيم النصية تمرّ بـ esc، والمنتج غير المتوفر يُعرض معطّلًا.
 function productCard(p){
   const out=Number(p.stock||0)<=0,fav=isFav(p.id);
   return `<article class="product-card"><div class="product-image-wrap"><img class="product-image" src="${esc(p.thumb||p.image)}" alt="${esc(p.alt||p.name)}" width="600" height="648" loading="lazy" decoding="async"><span class="product-badge">${out?'نفد المخزون':esc(p.badge||'متوفر')}</span><button class="favorite-btn${fav?' active':''}" data-favorite="${esc(p.id)}" aria-label="المفضلة: ${esc(p.name)}" aria-pressed="${fav}">${icons.heart}</button><button class="quick-add" data-quick="${esc(p.id)}">${out?'عرض التفاصيل':'عرض التفاصيل وإضافة للسلة'}</button></div><div class="product-info"><p class="product-category">${esc(p.categoryName||'ستائر وأقمشة')}</p><h3 class="product-name"><a class="product-link" href="${esc(productUrl(p))}">${highlightHtml(p.name,searchTerm)}</a></h3><div class="product-bottom"><span class="product-price">${priceHtml(p)}</span><span class="rating"><span aria-hidden="true">✦</span> ${out?'غير متوفر':'متاح'}</span></div></div></article>`;
 }
+// رسالة «لا نتائج» المناسبة للحالة: مفضلة فارغة، أو لا متوفر، أو بحث بلا نتيجة، أو قسم فارغ.
 function emptyState(){
   if(showFavorites)return ['لا توجد منتجات في المفضلة بعد','أضف قطعة إلى المفضلة بالضغط على علامة القلب.'];
   if(stockOnly&&!searchTerm)return ['لا توجد منتجات متوفرة حاليًا في هذا العرض','ألغِ «المتوفر فقط» لرؤية كل المنتجات.'];
@@ -1042,9 +1149,12 @@ function emptyState(){
   if(PAGE==='category')return ['لا توجد منتجات في هذا القسم حاليًا','تصفّح الأقسام الأخرى أو تواصل مع المتجر.'];
   return activeFilter==='all'?['لا توجد منتجات معروضة حاليًا','تواصل مع المتجر للاستفسار عن الخيارات المتاحة.']:['لم نعثر على نتيجة مطابقة','جرّب كلمة أخرى أو غيّر القسم المحدد.'];
 }
+// هياكل تحميل (skeleton) تظهر أثناء انتظار الكتالوج بدل شبكة فارغة.
 const skeletonGrid=(n=8)=>'<span class="sr-only">جارٍ تحميل المنتجات…</span>'+'<article class="product-card skeleton" aria-hidden="true"><div class="product-image-wrap skel"></div><div class="product-info"><p class="skel-line w40"></p><p class="skel-line w80"></p><p class="skel-line w30"></p></div></article>'.repeat(n);
 const skeletonCategories=()=>'<div class="category-card skeleton" aria-hidden="true"></div>'.repeat(3);
 const sortValue=()=>$('#sortSelect')?$('#sortSelect').value:'featured';
+// يطبّق بالترتيب: القسم، فالمفضلة، فالمتوفر فقط، فالبحث، ثم الترتيب. المنتج بلا سعر (حسب الطلب) يوضع في آخر
+// القائمة في ترتيبي السعر.
 function filteredProducts(){
   const tokens=searchTokens(searchTerm),sort=sortValue();
   const list=matchProducts(PRODUCTS.filter(p=>(activeFilter==='all'||p.category===activeFilter)&&(!showFavorites||isFav(p.id))&&(!stockOnly||Number(p.stock||0)>0)),searchTerm);
@@ -1056,6 +1166,7 @@ function filteredProducts(){
   if(tokens.length&&sort==='featured'){const score=new Map(list.map(p=>[p,relevance(p,tokens)]));list.sort((a,b)=>score.get(b)-score.get(a))} // best match first (stable for equal scores)
   return list;
 }
+// يُظهر زر «مسح التصفية» فقط عندما يكون هناك فلتر نشط.
 function syncFilterUi(){
   const clear=$('#clearFilters'),so=$('#stockOnly');
   if(clear)clear.hidden=!((activeFilter!=='all'&&activeFilter!==PAGE_CATEGORY)||stockOnly||searchTerm||showFavorites||sortValue()!=='featured');
@@ -1066,6 +1177,8 @@ function resetFilters(){
   const sel=$('#sortSelect');if(sel)sel.value='featured';const input=$('#searchInput');if(input)input.value='';
   syncChips();updateCounts();renderProducts();syncSearchUrl();
 }
+// الرسم الرئيسي للشبكة حسب catalogState: تحميل (هياكل) أو خطأ (رسالة وإعادة محاولة) أو جاهز (قائمة مصفّاة).
+// بعد إعادة الرسم يُعاد التركيز إلى نفس زر البطاقة الذي كان عليه المستخدم.
 function renderProducts(){
   if(PAGE==='products'){const h=$('#pageTitle');if(h){h.dataset.base=h.dataset.base||h.textContent;h.textContent=showFavorites?'المفضلة':h.dataset.base;document.title=`${h.textContent} | ${STORE.name||'الفخامة للأقمشة والستائر'}`}}
   if(!productGrid)return;
@@ -1084,10 +1197,13 @@ function renderProducts(){
   prepImages(productGrid);
   if(again){const el=productGrid.querySelector(again);if(el)el.focus({preventScroll:true})}
 }
+// مزامنة أزرار القلب خارج الشبكة الحية مع المفضلة المحفوظة.
 // Heart buttons outside the live grid (server-rendered cards, related products) follow the saved favourites too.
 function syncFavorites(){
   $$('[data-favorite]').forEach(b=>{const fav=isFav(b.dataset.favorite);b.classList.toggle('active',fav);b.setAttribute('aria-pressed',String(fav))});
 }
+// ---- 8) السلة والمفضلة ----
+// تحديث شارتي عدد السلة والمفضلة في الترويسة.
 function updateCounts(){
   const n=cart.reduce((s,i)=>s+i.qty,0),cc=$('#cartCount'),fc=$('#favCount'),ft=$('#favoritesToggle');
   if(cc){cc.textContent=n;cc.classList.toggle('show',n>0)}
@@ -1095,11 +1211,13 @@ function updateCounts(){
   // a toggle only where favourites are shown in place (pages with the full catalogue grid); elsewhere it opens /products?favorites=1
   if(ft){ft.classList.toggle('fav-view-active',showFavorites);if(favoritesInPlace())ft.setAttribute('aria-pressed',String(showFavorites));else ft.removeAttribute('aria-pressed')}
 }
+// حساب المجموع في المتصفح للعرض فقط: المنتجات «حسب الطلب» لا تدخل المجموع؛ والخادم هو المرجع في الطلب الفعلي.
 function cartTotals(){
   let subtotal=0,pendingLines=0;
   cart.forEach(i=>{const p=PRODUCTS.find(x=>String(x.id)===String(i.id));if(!p)return;if(onRequest(p))pendingLines++;else subtotal+=Number(p.price)*i.qty});
   return {subtotal,pendingLines,fee:Number(STORE.delivery_fee)||0};
 }
+// يرسم محتوى درج السلة والمجاميع وملاحظات التوصيل، مع شريط «تراجع» بعد الحذف.
 function renderCart(){
   updateCounts();const items=$('#cartItems');if(!items)return;const count=cart.reduce((s,i)=>s+i.qty,0);setText('#drawerItemCount',count?`(${count})`:'');
   const t=cartTotals(),pending=t.pendingLines>0,pn=$('#pendingNote');
@@ -1114,6 +1232,7 @@ function renderCart(){
   if(pn){pn.hidden=!pending;pn.textContent=pending?`${countAr(t.pendingLines)} بسعر «حسب الطلب» لا يدخل في المجموع حتى يؤكد المتجر المقاس والسعر.`:''}
   setText('#shippingNote',(pending?'أسعار الستائر المفصّلة تُحدَّد بعد تأكيد المقاس والخامة. ':'')+(STORE.delivery_note||'رسوم التوصيل تُحدد بحسب المدينة والمنتج.'));
 }
+// إضافة للسلة مع حدود: المنتج موجود ومتوفر، والكمية بين 1 و50، ولا تتجاوز المخزون المتاح.
 function addToCart(id,qty=1){
   const p=PRODUCTS.find(x=>String(x.id)===String(id));if(!p){toast('لم نعثر على المنتج؛ حدّث الصفحة');return false}
   if(Number(p.stock||0)<=0){toast('هذا المنتج غير متوفر حاليًا');return false}
@@ -1123,6 +1242,7 @@ function addToCart(id,qty=1){
   const add=Math.min(qty,room);if(item)item.qty+=add;else cart.push({id:p.id,qty:add});
   saveState();renderCart();toast(add<qty?`أُضيفت ${add} فقط؛ الكمية المتاحة ${p.stock}`:`أُضيف ${p.name} إلى السلة`);return true;
 }
+// الحذف يحتفظ بالسطر 8 ثوانٍ في undoLine ليمكن التراجع عنه.
 function removeFromCart(id){
   const idx=cart.findIndex(x=>String(x.id)===String(id));if(idx<0)return;
   const [gone]=cart.splice(idx,1),p=PRODUCTS.find(x=>String(x.id)===String(gone.id));
@@ -1135,34 +1255,44 @@ function undoRemove(){
   if(p&&Number(p.stock||0)>0&&!cart.some(x=>String(x.id)===String(u.id))){cart.splice(Math.min(u.index,cart.length),0,{id:u.id,qty:Math.min(u.qty,Number(p.stock))});saveState()}
   renderCart();toast('أُعيد المنتج إلى السلة');
 }
+// تبديل منتج في المفضلة وحفظه.
 function toggleFavorite(id){const has=isFav(id);favorites=has?favorites.filter(x=>String(x)!==String(id)):[...favorites,id];saveState();updateCounts();if(showFavorites)renderProducts();else syncFavorites();toast(has?'أُزيل من المفضلة':'أُضيف إلى المفضلة')}
+// ---- 9) النوافذ المنبثقة: التركيز ولوحة المفاتيح وسجل المتصفح ونافذة المنتج ----
 const baseTitle=document.title;
 let lastFocus=null,productPushed=false,ignoreNextPop=false,ignorePopTimer=0,closingFromHistory=false,modalProduct=null,modalQty=1,modalMax=1;
 const REC_KEY='fakhama-recent-v1';
+// حفظ آخر 10 منتجات شاهدها الزائر (محليًا) ويُطلق الحدث recent:update لتتابعه أجزاء الصفحة الأخرى.
 function trackViewed(id){
   try{let list=safeLoad(REC_KEY,[]);if(!Array.isArray(list))list=[];list=[String(id),...list.map(String).filter(x=>x!==String(id))].slice(0,10);localStorage.setItem(REC_KEY,JSON.stringify(list))}catch{}
   document.dispatchEvent(new CustomEvent('recent:update'));
 }
+// حبس التركيز: Tab و Shift+Tab يدوران داخل النافذة المفتوحة ولا يخرجان إلى الصفحة خلفها.
 function focusables(root){return [...root.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select,textarea,[tabindex]:not([tabindex="-1"])')].filter(el=>el.offsetParent!==null||el===document.activeElement)}
 function trapTab(e){
   if(e.key!=='Tab')return;const drawer=$('#cartDrawer');const open=$('.modal-backdrop.open')||(drawer&&drawer.classList.contains('open')?drawer:null);if(!open)return;
   const f=focusables(open);if(!f.length)return;const first=f[0],last=f[f.length-1];
   if(e.shiftKey&&(document.activeElement===first||!open.contains(document.activeElement))){e.preventDefault();last.focus()}else if(!e.shiftKey&&(document.activeElement===last||!open.contains(document.activeElement))){e.preventDefault();first.focus()}
 }
+// إعادة التركيز إلى العنصر الذي فتح النافذة عند إغلاقها.
 function restoreFocus(){if(lastFocus&&document.contains(lastFocus)){lastFocus.focus();lastFocus=null}}
 const drawerOpen=()=>Boolean($('#cartDrawer')&&$('#cartDrawer').classList.contains('open'));
+// عند فتح نافذة تُعطَّل الصفحة خلفها بالسمة inert (لا تركيز ولا قارئ شاشة).
 // While a dialog (cart drawer, quick view, order form) is open the page behind it is inert: no focus, no screen-reader access, nothing to tab out to.
 function syncInert(){const on=drawerOpen()||Boolean($('.modal-backdrop.open'));$$('#main,.site-footer,.site-header,.top-notices,#toTop').forEach(el=>{if(on)el.setAttribute('inert','');else el.removeAttribute('inert')})}
 function openDrawer(){lastFocus=document.activeElement;renderCart();$('#cartDrawer').inert=false;$('#cartDrawer').classList.add('open');syncInert();$('#drawerOverlay').classList.add('open');document.body.classList.add('locked');$('#cartClose').focus()}
 function closeDrawer(){const was=drawerOpen();if(!was)return;$('#cartDrawer').classList.remove('open');$('#cartDrawer').inert=true;$('#drawerOverlay').classList.remove('open');if(!$('.modal-backdrop.open'))document.body.classList.remove('locked');syncInert();restoreFocus()}
+// فتح وإغلاق النوافذ: يُقفل تمرير الصفحة بالصنف locked وتُحدَّث حالة inert.
 function openModal(el){if(!$('.modal-backdrop.open'))lastFocus=document.activeElement;el.classList.add('open');document.body.classList.add('locked');syncInert();const focusable=el.querySelector('.modal-close,button,input,textarea');if(focusable)setTimeout(()=>focusable.focus(),60)}
 function closeModal(el){const was=el.classList.contains('open');el.classList.remove('open');if(!$('.modal-backdrop.open')&&!drawerOpen())document.body.classList.remove('locked');syncInert();if(!was)return;if(el.id==='productModal')afterProductClose();if(!$('.modal-backdrop.open'))restoreFocus()}
+// النافذة السريعة تضع /product/<slug> في العنوان؛ عند إغلاقها نعود للصفحة الأصلية دون ترك سجل زائد.
 // Quick view puts /product/<slug> in the address bar; closing it returns to the page it was opened from.
 function afterProductClose(){
   document.title=baseTitle;modalProduct=null;if(closingFromHistory)return;
   if(productPushed){productPushed=false;ignoreNextPop=true;clearTimeout(ignorePopTimer);ignorePopTimer=setTimeout(()=>{ignoreNextPop=false},600);history.back()}
   else if(location.pathname!==PAGE_PATH)history.replaceState(null,'',PAGE_PATH+pageSearch);
 }
+// يبني نافذة تفاصيل المنتج: المعرض والسعر والكمية والمشاركة. النصوص تمرّ بـ esc، والخيار push=false لحالة
+// الرجوع من السجل.
 function showProduct(id,opts={}){
   const p=PRODUCTS.find(x=>String(x.id)===String(id));if(!p)return false;const available=Number(p.stock||0)>0;modalProduct=p;modalQty=1;modalMax=Math.max(1,Math.min(50,Number(p.stock||0)));
   const imgs=p.images&&p.images.length?p.images:[{url:p.image,thumb:p.image}],multi=imgs.length>1,fav=isFav(p.id);
@@ -1177,6 +1307,7 @@ function showProduct(id,opts={}){
   if(opts.push!==false&&location.pathname!==productUrl(p)){history.pushState({pid:p.id},'',productUrl(p));productPushed=true}
   trackViewed(p.id);openModal($('#productModal'));return true;
 }
+// ---- 10) معرض الصور ونسخ الرابط والرجوع في المتصفح ----
 // Swap a gallery photo: the small thumbnail (already cached) stays blurred behind it while the full-size file loads.
 function swapImage(img,src,thumb){
   if(!img||!src)return;const stage=img.parentElement;
@@ -1188,6 +1319,7 @@ function swapImage(img,src,thumb){
   const pre=new Image(),done=()=>{if(img._swap!==token)return;img.src=src;img.classList.remove('is-swapping')};
   pre.onload=done;pre.onerror=done;pre.src=src;
 }
+// الانتقال بين صور معرض النافذة (دائريًا) وتحديث العدّاد وحالة الأزرار.
 function setGalleryImage(index){
   const root=$('#productModalContent');const btns=[...root.querySelectorAll('[data-gindex]')];if(!btns.length)return;
   const i=(index+btns.length)%btns.length,thumb=btns[i].querySelector('img'),p=modalProduct,im=p&&p.images&&p.images[i]?p.images[i]:null;
@@ -1202,25 +1334,32 @@ function setPageImage(index,focus){
   btns.forEach((b,k)=>{b.classList.toggle('active',k===i);b.setAttribute('aria-pressed',String(k===i))});
   const c=$('#pageGalleryCount');if(c)c.textContent=`${amount(i+1)} من ${amount(btns.length)}`;if(focus)btn.focus();
 }
+// نسخ نص للحافظة؛ إن فشلت واجهة clipboard جُرّبت طريقة textarea ثم يُعرض النص في الرسالة.
 async function copyLink(url,message='تم نسخ رابط المنتج'){
   try{await navigator.clipboard.writeText(url);toast(message);return}catch{}
   try{const ta=document.createElement('textarea');ta.value=url;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();if(ok){toast(message);return}}catch{}
   toast(url);
 }
+// زر الرجوع/الأمام في المتصفح: يفتح نافذة المنتج إن كان العنوان /product/... ويغلقها إن عدنا للصفحة الأصلية.
 window.addEventListener('popstate',()=>{
   if(ignoreNextPop){ignoreNextPop=false;clearTimeout(ignorePopTimer);return}
   const modal=$('#productModal'),m=location.pathname.match(/^\/product\/([^/]+)/);
   if(location.pathname!==PAGE_PATH&&m){let slug=m[1];try{slug=decodeURIComponent(slug)}catch{}const p=PRODUCTS.find(x=>x.slug===slug);if(p){showProduct(p.id,{push:false});productPushed=true;return}}
   if(modal&&modal.classList.contains('open')){productPushed=false;closingFromHistory=true;closeModal(modal);closingFromHistory=false}
 });
+// orderKey مفتاح تكرار (Idempotency-Key) عشوائي للطلب: إعادة الإرسال بعد انقطاع الشبكة تعيد النتيجة الأولى ولا
+// تنشئ طلبًا ثانيًا.
 let orderKey=null;const newKey=()=>(window.crypto&&crypto.randomUUID?crypto.randomUUID():`${Date.now()}${Math.random().toString(16).slice(2)}`).replace(/[^A-Za-z0-9_-]/g,'');
+// ---- 11) إتمام الطلب: التحقق من الحقول والملخص وشاشة التأكيد ----
 // --- order flow: summary, inline validation (same rules as the server), confirmation panel
+// قواعد التحقق في المتصفح لتسريع التصحيح فقط؛ الخادم يتحقق من جديد ولا يعتمد على ما يرسله المتصفح.
 const ORDER_RULES={
   name:v=>v.trim().length>=2?'':'اكتب الاسم كاملًا (حرفان على الأقل).',
   phone:v=>{const d=toLatin(v).replace(/\D/g,'');if(!d)return 'اكتب رقم الجوال.';if(d.length<8||d.length>15)return 'رقم الجوال غير صحيح؛ تحقق من عدد الأرقام.';if(d.startsWith('05')&&d.length!==10)return 'رقم الجوال السعودي يبدأ بـ 05 ويتكون من 10 أرقام.';return ''},
   city:v=>v.trim().length>=2?'':'اكتب اسم المدينة.'
 };
 const orderFields=()=>['customerName','customerPhone','customerCity','orderConsent'].map(id=>document.getElementById(id)).filter(Boolean);
+// يفحص حقلًا واحدًا ويعرض رسالة الخطأ ويضبط aria-invalid؛ يعيد نص الخطأ أو سلسلة فارغة.
 function checkOrderField(input){
   const msg=input.name==='consent'?(input.checked?'':'يلزم الموافقة على سياسة الخصوصية لإرسال الطلب.'):ORDER_RULES[input.name]?ORDER_RULES[input.name](input.value):'';
   const err=document.getElementById(input.id==='orderConsent'?'orderConsentError':input.id+'Error');
@@ -1230,6 +1369,7 @@ function checkOrderField(input){
 }
 function setOrderStep(n){$$('#orderSteps li').forEach((li,i)=>{li.classList.toggle('done',i<n-1||n===3);if(i===n-1)li.setAttribute('aria-current','step');else li.removeAttribute('aria-current')})}
 function showOrderAlert(text,focus){const a=$('#orderAlert');if(!a)return;a.textContent=text;a.hidden=!text;if(text&&focus)a.focus()}
+// ملخص الطلب: سطور المنتجات والإجمالي التقديري، وتنبيه إن وُجدت منتجات بسعر «حسب الطلب».
 function renderOrderSummary(){
   const box=$('#orderSummary');if(!box)return;const t=cartTotals();
   const rows=cart.map(i=>{const p=PRODUCTS.find(x=>String(x.id)===String(i.id));return p?`<li><span>${esc(p.name)} × ${amount(i.qty)}</span><span>${onRequest(p)?'حسب الطلب':fmt(p.price*i.qty)}</span></li>`:''}).join('');
@@ -1241,13 +1381,19 @@ function resetOrderView(){
   setText('#orderTitle','بيانات الطلب');setOrderStep(2);showOrderAlert('');
   orderFields().forEach(i=>{i.removeAttribute('aria-invalid')});$$('#orderForm .field-error').forEach(e=>{e.hidden=true;e.textContent=''});
 }
+// شاشة التأكيد بعد نجاح الطلب (رقم الطلب وخيار نسخه).
 function showOrderDone(number){
   const body=$('#orderBody'),done=$('#orderDone');if(!body||!done)return;body.hidden=true;
   done.innerHTML=`<span class="done-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><p>رقم طلبك</p><div class="order-no"><bdi dir="ltr">${esc(number)}</bdi><button type="button" class="copy-order" data-copy-order="${esc(number)}">نسخ</button></div><p>سجّل المتجر طلبك وسيتواصل معك لتأكيد المقاس والخامة والسعر النهائي. لا يوجد دفع إلكتروني في هذا الإصدار.</p><button type="button" class="btn btn-primary" data-order-close>متابعة التسوق</button>`;
   done.hidden=false;setText('#orderTitle','تم تسجيل طلبك');setOrderStep(3);const h=$('#orderTitle');if(h)h.focus();
 }
+// بدء الطلب: يتأكد أن الكتالوج جاهز والسلة غير فارغة، ثم يهيئ مفتاح التكرار ويفتح نافذة الطلب.
 function startOrder(){if(catalogState!=='ready'){toast('تعذّر تحميل المنتجات الحالية؛ أعد المحاولة بعد عودة الاتصال');return}if(!cart.length){toast('أضف منتجًا إلى السلة أولًا');return}closeDrawer();orderKey=orderKey||newKey();const city=$('#customerCity');if(city&&!city.value)city.value=STORE.city&&STORE.city!=='أضف المدينة'?STORE.city:'';resetOrderView();renderOrderSummary();openModal($('#orderModal'))}
+// فتح واتساب برقم المتجر إن وُجد (noopener لحماية الصفحة)، وإلا الاتصال الهاتفي، وإلا رسالة تنبيه.
 function sendWhatsApp(text){const number=(STORE.whatsapp||'').replace(/\D/g,'');if(number){window.open(`https://wa.me/${number}?text=${encodeURIComponent(text)}`,'_blank','noopener,noreferrer');return true}const phone=(STORE.phone||'').replace(/[^\d+]/g,'');if(phone){window.location.href=`tel:${phone}`;return true}toast('بيانات التواصل غير متاحة حاليًا.');return false}
+// ---- 12) تحميل البيانات الحية من الخادم ----
+// تطبيق إعدادات المتجر القادمة من /api/store على عناصر الصفحة. رابط الخريطة لا يُقبل إلا إذا بدأ بـ http أو
+// https.
 function applyStoreSettings(s){
   STORE={...STORE,...s};
   $$('[data-store-name]').forEach(el=>el.textContent=STORE.name||'الفخامة للأقمشة والستائر');$$('[data-store-tagline]').forEach(el=>el.textContent=STORE.tagline||'تفصيل ستائر وأقمشة في جدة');$$('[data-store-city]').forEach(el=>el.textContent=STORE.city||'جدة');
@@ -1259,11 +1405,14 @@ function applyStoreSettings(s){
   if(STORE.hero_title)setText('#heroTitle',STORE.hero_title);if(STORE.hero_copy)setText('#heroCopy',STORE.hero_copy);
   // Title, description, canonical, Open Graph and JSON-LD are written by the server so crawlers and link previews see them.
 }
+// طلب JSON مع مهلة (15 ثانية افتراضيًا) تُلغي الطلب بـ AbortController ولا تترك الصفحة معلّقة.
 async function fetchJson(url,ms=15000){
   const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),ms);
   try{const res=await fetch(url,{signal:ctrl.signal});if(!res.ok)throw new Error(`HTTP ${res.status}`);return await res.json()}finally{clearTimeout(timer)}
 }
 let catalogPromise=null;
+// تحميل المنتجات والأقسام معًا؛ بعده تُنظَّف السلة والمفضلة من منتجات لم تعد موجودة وتُقصّ الكمية على المخزون.
+// عند الفشل تصبح الحالة error فتظهر رسالة وزر إعادة المحاولة بدل بيانات مختلقة.
 function loadLiveCatalog(){
   catalogPromise=(async()=>{
     catalogState='loading';renderProducts();
@@ -1285,9 +1434,11 @@ function loadLiveCatalog(){
   })();
   return catalogPromise;
 }
+// النقرات التي تحتاج الكتالوج تنتظر انتهاء تحميله بدل أن تفشل.
 // Clicks that need the live catalogue wait for it instead of failing while it is still loading.
 const whenCatalog=()=>catalogState==='loading'&&catalogPromise?catalogPromise:Promise.resolve();
 
+// ---- 13) التنقل والبحث وصفحة المنتج ونموذج التواصل ----
 // --- page navigation: aria-current on the main menu for the page the server rendered
 function markNav(){
   const path=(PAGE_PATH.replace(/\/+$/,'')||'/').replace(/^\/index\.html$/,'/');
@@ -1296,6 +1447,7 @@ function markNav(){
   $$('#mainNav a').forEach(a=>{if(a.getAttribute('href')===target)a.setAttribute('aria-current',value);else a.removeAttribute('aria-current')});
 }
 // --- header search: a real GET form to /products?q=; pages with a catalogue grid filter live while typing
+// يكتب الفلاتر والبحث في عنوان الصفحة (replaceState) دون إضافة سجل، ليمكن نسخ الرابط ومشاركته.
 function syncSearchUrl(){
   if(!LIST_PAGE)return;const params=new URLSearchParams(location.search);
   const put=(k,v)=>{if(v)params.set(k,v);else params.delete(k)};
@@ -1305,6 +1457,7 @@ function syncSearchUrl(){
   const intro=PAGE==='products'?$('.page-hero-intro'):null;
   if(intro)intro.textContent=showFavorites?'المنتجات التي حفظتها في المفضلة على هذا الجهاز.':searchTerm?`نتائج البحث عن «${searchTerm}». امسح البحث لعرض كل المنتجات.`:`ستائر وأقمشة ${STORE.name} في ${STORE.city||'جدة'}. ابحث ورتّب واختر القسم، وافتح أي منتج لمشاهدة صوره وتفاصيله.`;
 }
+// البحث أثناء الكتابة في صفحات الشبكة؛ وفي غيرها يُرسل النموذج إلى /products?q= عادةً.
 function initSearch(){
   const form=$('#searchBar'),input=$('#searchInput');if(!input)return;
   if(PAGE==='products'&&searchTerm)input.value=searchTerm;
@@ -1316,6 +1469,7 @@ function initSearch(){
   });
 }
 // --- product page (body[data-page=product]): gallery, add to cart; the rest is shared delegation below
+// صفحة المنتج: تسجيل المشاهدة والتنقل بين الصور بأسهم لوحة المفاتيح (مع انعكاس الاتجاه في RTL).
 function initProductPage(){
   if(PAGE!=='product')return;
   const actions=$('.product-page-actions'),pid=document.body.dataset.productId;if(pid)trackViewed(pid);
@@ -1325,6 +1479,8 @@ function initProductPage(){
   });
 }
 // --- contact page: the enquiry form posts JSON to /api/contact (without JavaScript it posts the form itself)
+// يرسل النموذج JSON إلى /api/contact مع مهلة 20 ثانية ومنع الإرسال المزدوج بتعطيل الزر؛ وتُعرض رسالة الخطأ
+// المفهومة فقط.
 function initContactForm(){
   const form=$('#contactForm');if(!form)return;const status=$('#contactStatus'),button=form.querySelector('button[type=submit]');
   const say=(state,text)=>{if(!status)return;if(state)status.dataset.state=state;else delete status.dataset.state;status.textContent=text};
@@ -1345,7 +1501,10 @@ function initContactForm(){
   });
 }
 
+// ---- 14) ربط الأحداث ----
 // --- shared event wiring (every element is optional)
+// تفويض الأحداث (event delegation): مستمع نقر واحد على المستند يتعرّف على الأزرار بسمات data-* ويعمل مع بطاقات
+// تُرسم لاحقًا.
 document.addEventListener('click',async e=>{
   const t=e.target;if(!(t instanceof Element))return;
   if(t.closest('[data-retry-catalog]')){loadLiveCatalog();return}
@@ -1360,11 +1519,14 @@ document.addEventListener('click',async e=>{
   if(t.closest('[data-order-close]')){closeModal($('#orderModal'));return}
   if(t.closest('[data-clear-filters]')){resetFilters();const sel=$('#sortSelect');if(sel)sel.focus();return}
 });
+// فلتر الأقسام والترتيب والمتوفر فقط: كلها تعيد رسم الشبكة وتحدّث العنوان.
 on($('#filterList'),'click',e=>{const b=e.target.closest('[data-filter]');if(!b)return;activeFilter=b.dataset.filter;showFavorites=false;syncChips();updateCounts();renderProducts();syncSearchUrl()});
 on($('#sortSelect'),'change',()=>{renderProducts();syncSearchUrl()});
 on($('#stockOnly'),'change',e=>{stockOnly=e.target.checked;renderProducts();syncSearchUrl()});
+// قائمة الهاتف: فتح/إغلاق، وإغلاقها عند اختيار رابط.
 $$('#mainNav a').forEach(a=>a.addEventListener('click',()=>{$('#mainNav').classList.remove('open');$('#menuToggle')?.setAttribute('aria-expanded','false')}));
 on($('#menuToggle'),'click',()=>{const open=$('#mainNav').classList.toggle('open');$('#menuToggle').setAttribute('aria-expanded',String(open));if(open)setTimeout(()=>$('#mainNav a')?.focus(),30)});
+// مفتاح Escape يغلق قائمة الهاتف وحقل البحث المفتوح.
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape')return;
   const nav=$('#mainNav'),bar=$('#searchBar');
@@ -1372,13 +1534,16 @@ document.addEventListener('keydown',e=>{
   if(bar&&bar.classList.contains('open')){bar.classList.remove('open');$('#searchToggle')?.setAttribute('aria-expanded','false');$('#searchToggle')?.focus()}
 });
 on($('#searchToggle'),'click',()=>{const open=$('#searchBar').classList.toggle('open');$('#searchToggle').setAttribute('aria-expanded',String(open));if(open)setTimeout(()=>$('#searchInput').focus(),50)});
+// زر المفضلة
 on($('#favoritesToggle'),'click',()=>{
   // favourites are listed on a page with the full catalogue grid; elsewhere the button opens /products?favorites=1
   if(!favoritesInPlace()){location.href='/products?favorites=1';return}
   showFavorites=!showFavorites;activeFilter='all';syncChips();updateCounts();renderProducts();syncSearchUrl();
   $('#shop').scrollIntoView({behavior:calmMotion?'auto':'smooth'});if(showFavorites)toast('عرض المنتجات المحفوظة في المفضلة');
 });
+// فتح السلة وإغلاقها، ثم تغيير الكميات والحذف والتراجع من داخل الدرج.
 on($('#cartOpen'),'click',openDrawer);on($('#cartClose'),'click',closeDrawer);on($('#drawerOverlay'),'click',closeDrawer);
+// تعديل الكمية يتوقف عند حد المخزون، والتركيز يبقى على نفس الزر بعد إعادة الرسم.
 on($('#cartItems'),'click',e=>{
   const change=e.target.closest('[data-qty]');
   if(change){
@@ -1395,6 +1560,7 @@ on($('#cartItems'),'click',e=>{
   if(e.target.closest('#emptyShopLink'))closeDrawer();
 });
 on($('#checkoutBtn'),'click',startOrder);
+// أزرار نافذة المنتج: الإضافة للسلة وتغيير الكمية والانتقال بين الصور.
 on($('#productModalContent'),'click',e=>{
   const add=e.target.closest('[data-modal-add]');if(add){if(addToCart(add.dataset.modalAdd,modalQty))closeModal($('#productModal'));return}
   const q=e.target.closest('[data-mqty]');if(q){const next=Math.max(1,Math.min(modalMax,modalQty+Number(q.dataset.mqty)));if(next===modalQty&&Number(q.dataset.mqty)>0)toast(`الكمية المتاحة ${modalMax} فقط`);modalQty=next;setText('#modalQty',String(modalQty));return}
@@ -1402,15 +1568,21 @@ on($('#productModalContent'),'click',e=>{
 });
 $$('[data-close-modal]').forEach(btn=>btn.addEventListener('click',()=>closeModal(btn.closest('.modal-backdrop'))));
 $$('.modal-backdrop').forEach(backdrop=>backdrop.addEventListener('click',e=>{if(e.target===backdrop)closeModal(backdrop)}));
+// لوحة المفاتيح العامة: Escape يغلق قائمة الهاتف ثم السلة والنوافذ، و Tab يُحبس داخل النافذة، والأسهم تنقّل صور
+// النافذة.
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'){if($('#mainNav')?.classList.contains('open')&&!drawerOpen()&&!$('.modal-backdrop.open')){$('#mainNav').classList.remove('open');$('#menuToggle')?.setAttribute('aria-expanded','false');$('#menuToggle')?.focus();return}closeDrawer();$$('.modal-backdrop.open').forEach(closeModal);return}
   trapTab(e);
   if($('#productModal')?.classList.contains('open')&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){const cur=[...$('#productModalContent').querySelectorAll('[data-gindex]')].findIndex(b=>b.classList.contains('active'));setGalleryImage(cur+(e.key==='ArrowLeft'?1:-1))}
 });
+// أزرار واتساب: رسالة جاهزة باسم المتجر.
 $$('[data-whatsapp]').forEach(button=>button.addEventListener('click',()=>sendWhatsApp(`مرحبًا ${STORE.name}، أود الاستفسار عن الستائر والأقمشة والخدمات.`)));
+// التحقق الفوري: عند مغادرة الحقل، ثم عند الكتابة بعد ظهور خطأ، ثم عند تغيير خانة الموافقة.
 on($('#orderForm'),'focusout',e=>{const i=e.target;if(i instanceof HTMLInputElement&&orderFields().includes(i)&&(i.type==='checkbox'||i.value.trim()||i.hasAttribute('aria-invalid')))checkOrderField(i)});
 on($('#orderForm'),'input',e=>{const i=e.target;if(i instanceof HTMLInputElement&&i.getAttribute('aria-invalid')==='true')checkOrderField(i)});
 on($('#orderForm'),'change',e=>{const i=e.target;if(i instanceof HTMLInputElement&&i.type==='checkbox')checkOrderField(i)});
+// إرسال الطلب إلى /api/orders مع Idempotency-Key؛ بنود الطلب تُرسل بمعرّف المنتج والكمية فقط، دون أسعار.
+// عند النجاح تُفرَّغ السلة ويُمسح مفتاح التكرار؛ وعند الفشل تُعرض الرسالة ويبقى المفتاح لإعادة المحاولة الآمنة.
 on($('#orderForm'),'submit',async e=>{
   e.preventDefault();if(!cart.length){toast('السلة فارغة');return}const formEl=e.currentTarget,btn=formEl.querySelector('button[type=submit]');if(btn.disabled)return;
   const bad=orderFields().filter(i=>checkOrderField(i));
@@ -1427,11 +1599,16 @@ on($('#orderForm'),'submit',async e=>{
     showOrderAlert(msg,true);toast(msg);
   }finally{btn.disabled=false;btn.removeAttribute('aria-busy')}
 });
+// ---- 15) موافقة التحليلات (Google Analytics 4) ----
+// اختيارية بالكامل: بدون معرّف قياس مضبوط في الخادم لا يوجد شريط ولا يُحمَّل شيء من Google.
 // --- optional Google Analytics 4. The server renders #consentBanner (with the owner's measurement ID) only when one is set;
 // without it this does nothing. Nothing from Google loads until the visitor presses «قبول»; «رفض» loads nothing.
+// PAGE_NONCE قيمة nonce الخاصة بالصفحة (إن وُجدت) لتسمح سياسة CSP بوسم gtag المضاف ديناميكيًا.
 const CONSENT_KEY='fakhama-consent-v1',PAGE_NONCE=document.currentScript?.nonce||document.querySelector('script[nonce]')?.nonce||'';
 let gaLoaded=false,gaWithdrawn=false;
+// تعبير نمطي يطابق عناوين إرسال إحصاءات Google، لمنع ما تبقى منها بعد ضغط «رفض».
 const GA_HIT=/^https:\/\/([a-z0-9-]+\.)*(google-analytics\.com|analytics\.google\.com)\//;
+// تحميل gtag بعد القبول فقط: يُعطَّل كل شيء افتراضيًا (إعلانات وتخصيص) ثم يُسمح بتخزين التحليلات وحدها.
 function loadAnalytics(id){
   window.dataLayer=window.dataLayer||[];
   if(!window.gtag)window.gtag=function(){window.dataLayer.push(arguments)};
@@ -1443,6 +1620,8 @@ function loadAnalytics(id){
   gtag('consent','update',{analytics_storage:'granted'});
   gtag('js',new Date());
   gtag('config',id,{allow_google_signals:false,allow_ad_personalization_signals:false});
+  // تغليف fetch: يمنع طلبين (إعادة محاولة gtag نحو www.google.com وإرسالات ما بعد الرفض) دون المساس بباقي
+  // الطلبات.
   // Two requests are answered locally (nothing is sent), every other request goes out unchanged:
   // - gtag.js retries a hit whose fetch failed (typically one sent while the page unloads) on https://www.google.com/g/collect.
   //   That host is not on this shop's CSP allowlist, so the browser would block it and log a CSP violation.
@@ -1459,6 +1638,7 @@ function loadAnalytics(id){
   if(PAGE_NONCE)s.nonce=PAGE_NONCE; // the page's CSP nonce: the tag is allowed without 'unsafe-inline'
   document.head.appendChild(s);
 }
+// سحب الموافقة: إيقاف الإرسال وحذف كوكيز _ga و _gid و _ga_* من النطاق ونطاقاته الأعلى.
 function revokeAnalytics(id){
   window['ga-disable-'+id]=true;gaWithdrawn=true; // Google's documented switch: no further hits from this page
   if(window.gtag)gtag('consent','update',{analytics_storage:'denied'});
@@ -1468,6 +1648,8 @@ function revokeAnalytics(id){
     for(let i=0;i<parts.length-1;i++)document.cookie=`${n}=; Max-Age=0; path=/; domain=.${parts.slice(i).join('.')}`;
   });
 }
+// يتحقق أن معرّف القياس بصيغة G-XXXX قبل أي استخدام؛ الاختيار يُحفظ في localStorage، ويمكن تغييره من «إعدادات
+// الكوكيز».
 function initConsent(){
   const banner=$('#consentBanner'),id=banner?.dataset.ga4Id||'';
   if(!banner||!/^G-[A-Z0-9]{4,15}$/.test(id))return;
@@ -1494,21 +1676,29 @@ function initConsent(){
   const state=stored();
   if(state==='granted')loadAnalytics(id);else if(!state)show(false);
 }
+// ---- 16) بدء التشغيل: تهيئة الصفحة وتحميل الكتالوج وتسجيل عامل الخدمة ----
 setText('#year',new Date().getFullYear());
+// فشل شريط الموافقة لا يوقف المتجر (try/catch).
 try{initConsent()}catch(error){console.info('Consent banner unavailable.',error)} // never blocks the storefront
 {const g=$('#categoryGrid');if(g&&!g.children.length)g.innerHTML=skeletonCategories()}
 markNav();initSearch();initProductPage();initContactForm();renderProducts();renderCart();if(showFavorites)syncSearchUrl();loadLiveCatalog();
+// تسجيل عامل الخدمة /sw.js (للعمل كتطبيق ويب) بعد تحميل الصفحة، ويُتجاوز داخل تطبيق الأندرويد AlfakhamahApp.
 if('serviceWorker' in navigator&&!/AlfakhamahApp\//.test(navigator.userAgent))window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 
   </script>
+  <!-- زر العودة لأعلى الصفحة؛ يظهره سكربت الحركة بعد تمرير مسافة كافية. -->
   <button class="to-top" id="toTop" type="button" aria-label="العودة إلى أعلى الصفحة"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-7 7 7-7 7 7"/></svg></button>
+  <!-- ---- سكربت الحركة: تحسينات بصرية اختيارية، والصفحة تعمل بدونها ---- -->
   <script>
+  // طبقة الحركة: تحسين اختياري فقط، تتوقف كلها إذا طلب المستخدم تقليل الحركة، والمتجر يعمل بدونها.
   /* luxe motion layer: progressive enhancement only — the page works the same without it. */
   (()=>{
     const root=document.documentElement,header=document.querySelector('.site-header'),toTop=document.getElementById('toTop'),bar=document.querySelector('.scroll-progress');
     const calm=matchMedia('(prefers-reduced-motion: reduce)').matches,fine=matchMedia('(hover: hover) and (pointer: fine)').matches;
+    // إن دعم المتصفح animation-timeline يحرّك CSS شريط التقدم بنفسه، وإلا يحسبه السكربت أدناه.
     const cssProgress=CSS.supports&&CSS.supports('animation-timeline: scroll()');
     let ticking=false;
+    // حدث التمرير يُخفَّف بـ requestAnimationFrame: تحديث واحد لكل إطار (مع passive لتحسين الأداء).
     function onScroll(){
       if(ticking)return;ticking=true;
       requestAnimationFrame(()=>{
@@ -1522,6 +1712,7 @@ if('serviceWorker' in navigator&&!/AlfakhamahApp\//.test(navigator.userAgent))wi
     addEventListener('scroll',onScroll,{passive:true});onScroll();
     toTop&&toTop.addEventListener('click',()=>{scrollTo({top:0,behavior:calm?'auto':'smooth'});const main=document.getElementById('main');main&&main.focus({preventScroll:true})});
 
+    // نبضة بصرية لشارة السلة عند زيادة العدد (ترصدها MutationObserver).
     /* cart counter bump */
     const counter=document.getElementById('cartCount');
     if(counter&&!calm){let last=counter.textContent;new MutationObserver(()=>{if(counter.textContent!==last&&Number(counter.textContent)>Number(last||0)){counter.classList.remove('bump');void counter.offsetWidth;counter.classList.add('bump')}last=counter.textContent}).observe(counter,{childList:true,characterData:true,subtree:true})}
@@ -1529,12 +1720,16 @@ if('serviceWorker' in navigator&&!/AlfakhamahApp\//.test(navigator.userAgent))wi
     /* a tap on the photo opens the same details dialog as its button */
     document.addEventListener('click',e=>{const img=e.target.closest&&e.target.closest('.product-image');if(img){const b=img.closest('.product-card').querySelector('.quick-add');b&&b.click()}});
 
+    // من هنا فصاعدًا حركات تحتاج IntersectionObserver ولا تُشغَّل مع تقليل الحركة.
     if(calm||!('IntersectionObserver' in window))return;
 
+    // العناصر المطابقة للمحددات تُوسم rv ويُؤخَّر ظهورها تدريجيًا (تأخير حتى 6 خطوات)، وتظهر فورًا إن كانت على
+    // الشاشة.
     /* scroll reveal: sections and the cards the catalogue renders later (never the page hero or the product summary:
        anything already on screen when tagged is shown at once) */
     const SELECTORS='.section-head,.benefit,.category-card,.product-card,.story-card,.service-card,.guide-intro,.guide-item,.faq-intro,.faq-list details,.contact-card,.footer-top>*,.prose,.about-figure,.visit-card,.contact-form-card,.notfound-links li';
     const io=new IntersectionObserver(entries=>{for(const e of entries){if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}},{rootMargin:'0px 0px -8% 0px',threshold:.08});
+    // يوسم العناصر الجديدة (مثل بطاقات ترسمها الواجهة لاحقًا) ويراقب ظهورها.
     function tag(scope){
       const groups=new Map();
       scope.querySelectorAll(SELECTORS).forEach(el=>{
@@ -1553,6 +1748,7 @@ if('serviceWorker' in navigator&&!/AlfakhamahApp\//.test(navigator.userAgent))wi
 
     addEventListener('beforeprint',()=>document.querySelectorAll('.rv').forEach(el=>el.classList.add('in')));
 
+    // حركة صورة المنتج نحو أيقونة السلة عند الإضافة؛ تُنشأ نسخة مؤقتة تُحرَّك ثم تُزال.
     /* fly the product photo into the cart (quick-view dialog and the product page) */
     const cartBtn=document.getElementById('cartOpen');
     document.addEventListener('click',e=>{
@@ -1567,6 +1763,7 @@ if('serviceWorker' in navigator&&!/AlfakhamahApp\//.test(navigator.userAgent))wi
       clone.animate([{transform:'translate(0,0) scale(1)',opacity:1,borderRadius:'18px'},{transform:`translate(${dx*.55}px,${dy*.35-60}px) scale(.55)`,opacity:.95,offset:.55},{transform:`translate(${dx}px,${dy}px) scale(.08)`,opacity:.3,borderRadius:'50%'}],{duration:850,easing:'cubic-bezier(.5,0,.2,1)'}).onfinish=()=>{clone.remove();cartBtn.animate([{transform:'scale(1)'},{transform:'scale(1.25)'},{transform:'scale(1)'}],{duration:450,easing:'cubic-bezier(.34,1.56,.64,1)'})};
     },true);
 
+    // الميل ثلاثي الأبعاد للبطاقات يعمل فقط مع مؤشر دقيق يدعم التمرير فوق العناصر (hover)، أي الماوس لا اللمس.
     if(!fine)return;
     /* gentle 3D tilt + light that follows the pointer on product cards */
     let active=null,frame=0;
@@ -1588,6 +1785,7 @@ if('serviceWorker' in navigator&&!/AlfakhamahApp\//.test(navigator.userAgent))wi
     document.addEventListener('pointerleave',()=>{if(active){reset(active);active=null}});
   })();
   </script>
+  <!-- ---- تحميل سكربت التحسينات plus.js من نفس النطاق (يسمح به CSP) ---- -->
   <script>/* enhancement layer: same-origin file (CSP script-src 'self'), started once the page script above has defined its helpers */
   (()=>{const s=document.createElement('script');s.src='/assets/js/plus.js';s.defer=true;document.head.appendChild(s)})();
   </script>

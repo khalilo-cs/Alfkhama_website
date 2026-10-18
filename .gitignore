@@ -1,15 +1,24 @@
+# ---- ملفات بايثون المؤقتة ----
 __pycache__/
 *.pyc
+# ---- قاعدة البيانات المحلية (SQLite وملفاتها الجانبية) ----
+# تحوي بيانات حقيقية للعملاء فلا ترفع إلى Git.
 store.db
 store.db-shm
 store.db-wal
+# ---- الصور المرفوعة (نُبقي ملف .gitkeep فقط ليبقى المجلد) ----
 uploads/*
 !uploads/.gitkeep
+# ---- أسرار ومفاتيح التوقيع: لا ترفع إلى Git أبدًا ----
+# .env يحوي كلمات المرور؛ وملفات jks وkeystore ومعها keystore.properties هي مفاتيح توقيع تطبيق أندرويد.
 .env
 *.jks
 *.keystore
 keystore.properties
+# ---- ملفات محلية خاصة بالجهاز ----
+# local.properties فيه مسار Android SDK على جهازك؛ وpid وserver.log ناتجان عن تشغيل الخادم محليًا.
 local.properties
 *.pid
 server.log
+# ---- مخرجات البناء ----
 dist/

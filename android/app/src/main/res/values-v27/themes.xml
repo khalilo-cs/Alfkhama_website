@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف themes.xml لـ Android 8.1 فما فوق (values-v27): يستبدل الأساسي ويضيف شريط تنقل فاتحًا -->
+<!-- وتخطيطًا يمتد خلف الحَدّ. -->
 <resources>
     <style name="Theme.Alfakhamah" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/night</item>

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف app_name.xml: اسم التطبيق وعنوانا اختصار لوحة الإدارة (يُستعملان في المانيفست -->
+<!-- وshortcuts.xml). -->
 <resources>
     <string name="app_name">الفخامة</string>
     <string name="shortcut_admin_short">لوحة الإدارة</string>

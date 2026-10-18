@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
+# ==============================================================================================================
+# app.py : قلب المشروع. خادم HTTP واحد مكتوب بمكتبة بايثون القياسية فقط (بدون Flask أو أي حزمة خارجية).
+# ماذا يفعل هذا الملف:
+#   1) يحمل الإعدادات من متغيرات البيئة (HOST, PORT, DATA_DIR, ADMIN_PASSWORD ...) وملف .env المحلي.
+#   2) ينشئ قاعدة بيانات SQLite (store.db) والجداول ويزرع البيانات الأولية.
+#   3) يقدّم صفحات المتجر (بمساعدة pages.py و seo.py و legal.py) والملفات الثابتة (assets/uploads/icons).
+#   4) يوفّر واجهة JSON: عامة (الطلبات ونموذج التواصل) وللمدير (/api/admin/...) خلف جلسة وCSRF وتحديد محاولات.
+#   5) يدير النسخ الاحتياطي والاستعادة وأوامر سطر الأوامر (backup, restore, export-sql, set-admin).
+# كيف يرتبط بباقي المشروع: الواجهة الأمامية (index.html و admin.html وملفات JS/CSS) تتصل بهذا الخادم عبر
+# /api/...،
+# وتطبيق الأندرويد يعرض الموقع نفسه داخل WebView، و persist.py يحفظ لقطات خارجية، و totp.py يتحقق من رمز
+# الخطوتين.
+# ترتيب الملف: الإعدادات والثوابت ثم قاعدة البيانات ثم الإحصاءات ثم الدوال المساعدة ثم الكلاس StoreHandler ثم
+# النسخ الاحتياطي.
+# ==============================================================================================================
 """Small, dependency-free storefront + admin API backed by SQLite."""
 from __future__ import annotations
 
+# ---- المكتبات المستوردة (كلها من بايثون القياسي) ----
 import base64
 import csv
 import gzip
@@ -33,8 +49,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+# ---- المسارات الأساسية والوحدات الشقيقة ----
+# BASE_DIR هو مجلد المشروع (حيث يوجد app.py). نضيفه إلى sys.path ليعمل الاستيراد حتى مع python3 -I الذي يتجاهل
+# المجلد الحالي.
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR))  # sibling modules also when started with `python3 -I app.py`
+# الوحدات الشقيقة: legal (صفحات السياسات) و pages (توليد HTML للمتجر) و seo (العناوين والبيانات المنظمة)
+# و persist (حفظ لقطات خارجية) و totp (رموز التحقق بخطوتين).
 import legal  # noqa: E402
 import pages  # noqa: E402
 import seo  # noqa: E402
@@ -44,6 +65,9 @@ import totp  # noqa: E402
 VERSION = "2.0.0"
 
 
+# ---- تحميل ملف .env المحلي ----
+# يقرأ أسطر KEY=VALUE من ملف .env (ملف خاص خارج git). المتغير الموجود فعلًا في البيئة له الأولوية (setdefault).
+# ENV_FILE=off يعطّل القراءة، و ENV_FILE=مسار يحدد ملفًا آخر. لا تُكتب كلمات المرور في الشيفرة أبدًا.
 def load_local_env() -> None:
     """Read KEY=VALUE lines from a git-ignored .env beside app.py; variables already in the environment win."""
     name = os.environ.get("ENV_FILE", "")
@@ -64,6 +88,8 @@ def load_local_env() -> None:
         os.environ.setdefault(key.strip(), value)
 
 
+# ---- الإعدادات العامة من متغيرات البيئة ----
+# تُحمَّل مرة واحدة عند الإقلاع. القيم الافتراضية آمنة: الاستماع على الجهاز المحلي فقط.
 load_local_env()
 # DATA_DIR holds the mutable state (store.db + uploads/). Point it at a persistent volume in production.
 DATA_DIR = Path(os.environ.get("DATA_DIR") or BASE_DIR).expanduser().resolve()
@@ -71,6 +97,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "store.db"
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+# اسم ملف مرفوع مسموح: يبدأ بحرف أو رقم ثم حروف/أرقام/نقطة/شرطة فقط (يمنع المسارات وأسماء الملفات المخفية).
 UPLOAD_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}")
 ASSETS_DIR = BASE_DIR / "assets"
 ICONS_DIR = BASE_DIR / "icons"
@@ -86,29 +113,42 @@ TRUST_PROXY = os.environ.get("TRUST_PROXY", "") == "1"
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 # Design phase on one machine only: ALLOW_WEAK_PASSWORD=1 lets the first admin password be as short as 6 characters.
 # It is refused outright unless the server listens on loopback with no proxy and no public address.
+# LOCAL_ONLY صحيح فقط عند التشغيل المحلي البحت (عنوان loopback، بدون وكيل عكسي، وبدون عنوان عام).
 LOCAL_ONLY = HOST in ("127.0.0.1", "localhost", "::1") and not TRUST_PROXY and not PUBLIC_BASE_URL
 ALLOW_WEAK_PASSWORD = os.environ.get("ALLOW_WEAK_PASSWORD", "") == "1"
 if ALLOW_WEAK_PASSWORD and not LOCAL_ONLY:
     raise SystemExit("ALLOW_WEAK_PASSWORD=1 مسموح فقط عند التشغيل المحلي (HOST=127.0.0.1 بدون TRUST_PROXY وبدون PUBLIC_BASE_URL). احذفه قبل النشر.")
+# الحد الأدنى لطول كلمة مرور المدير: 12 خانة، ويُخفَّض إلى 6 فقط في وضع التصميم المحلي أعلاه.
 MIN_PASSWORD = 6 if ALLOW_WEAK_PASSWORD else 12
+# ---- حدود الجلسة والطلبات ----
+# عمر الجلسة المطلق 12 ساعة، وتنتهي أيضًا بعد ساعتين من عدم النشاط (انظر get_session).
 SESSION_TTL = 12 * 60 * 60
 SESSION_IDLE_TTL = 2 * 60 * 60
+# أقصى حجم لجسم الطلب بالبايت؛ يُفحص قبل قراءة الجسم حتى لا يستهلك طلب ضخم الذاكرة.
 MAX_BODY = 512 * 1024                      # default for JSON bodies (orders, settings, login ...)
 MAX_UPLOAD_BODY = 9 * 1024 * 1024         # one base64-encoded image (<= 5 MB) + its thumbnail
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# حد محاولات الطلب العامة: (العدد، النافذة بالثواني) لكل عنوان IP. قابل للتعديل بمتغيرات البيئة.
 ORDER_LIMIT = (int(os.environ.get("ORDER_LIMIT_PER_10MIN", "10")), 600)  # public order attempts per client per 10 minutes
 CONTACT_LIMIT = (int(os.environ.get("CONTACT_LIMIT_PER_10MIN", "5")), 600)  # accepted contact messages per client per 10 minutes
 CONTACT_MAX_BODY = 32 * 1024
 MESSAGE_STATUSES = {"new": "جديدة", "handled": "تمت المتابعة"}
+# ---- تعابير نمطية للتحقق من المدخلات ----
 # A plain address only: no ? & = % # / \ that could add headers (bcc=, body=) to the admin's mailto: link.
 EMAIL_RE = re.compile(r"[A-Za-z0-9.!$*+_~'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 # Invisible characters that let a sender disguise how a name reads in the inbox (bidi overrides, zero-width marks).
 INVISIBLE_RE = re.compile("[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+# ---- المسارات والملفات العامة ----
 # Server-rendered store pages (pages.py) and the URL path each one answers on.
 PAGE_ROUTES = {"/products": "products", "/categories": "categories", "/about": "about", "/contact": "contact", "/faq": "faq"}
 STATIC_PREFIXES = ("/assets/", "/uploads/", "/icons/")
+# مسار صورة منتج مقبول: داخل assets/ أو uploads/ فقط وباسم ملف بسيط (يمنع الخروج من المجلد).
 IMAGE_PATH_RE = re.compile(r"/?(?:assets|uploads)/[A-Za-z0-9][A-Za-z0-9._-]*")
+# ذاكرة مؤقتة (في RAM فقط) لنتائج الطلبات بمفتاح Idempotency-Key: {مفتاح: (وقت الانتهاء، النتيجة)}. تُفقد عند
+# إعادة التشغيل.
 IDEMPOTENT_ORDERS: dict[str, tuple[float, dict]] = {}
+# شكل قيمة ترويسة Host المقبولة؛ غيرها يُستبدل بـ localhost حتى لا تُبنى روابط من ترويسة مزوَّرة (انظر
+# base_url).
 HOST_RE = re.compile(r"[A-Za-z0-9.\-]+(?::\d{1,5})?|\[[0-9A-Fa-f:]+\](?::\d{1,5})?")
 # Root-level files the server may serve (everything else is 404). Values are paths under BASE_DIR.
 PUBLIC_FILES = {
@@ -118,9 +158,14 @@ PUBLIC_FILES = {
     "/favicon.ico": ("icons/favicon.ico", "image/x-icon"),
 }
 DEFAULT_SHARE_IMAGE = "/assets/wavy-11.jpg"
+# أنواع المحتوى التي تُضغط بـ gzip عند دعم المتصفح (النصوص و JSON و SVG...). الصور لا تُضغط لأنها مضغوطة أصلًا.
 COMPRESSIBLE = ("text/", "application/json", "application/javascript", "application/manifest+json", "application/xml", "image/svg+xml")
+# LOG_FORMAT=json يجعل سجل الطلبات بصيغة JSON (مفيد لمنصات الاستضافة).
 LOG_JSON = os.environ.get("LOG_FORMAT", "") == "json"
+# مدة الاحتفاظ بنتيجة الطلب لمفتاح التكرار: 600 ثانية (10 دقائق).
 IDEMPOTENCY_TTL = 600
+# ---- إعدادات النسخ الاحتياطي ----
+# AUTO_BACKUP=1 يشغّل نسخة يومية تلقائية في خيط خلفي، و BACKUP_KEEP عدد النسخ المحتفَظ بها من كل نوع.
 AUTO_BACKUP = os.environ.get("AUTO_BACKUP", "") == "1"
 BACKUP_KEEP = int(os.environ.get("BACKUP_KEEP", "14"))
 BACKUP_DIR = DATA_DIR / "backups"
@@ -129,11 +174,14 @@ BACKUP_APP = "fakhama-store"
 # The tables a restorable backup must contain (older databases are upgraded by init_db() on the next start).
 REQUIRED_TABLES = {"settings", "admins", "categories", "products", "orders", "order_items"}
 MAX_RESTORE_BYTES = 20 * 1024 ** 3         # refuse archives that would unpack to more than this (zip bombs)
+# ---- ثوابت الإحصاءات الخاصة بالمتجر (بدون تتبع للزوار) ----
 # First-party statistics: daily totals only. No cookies, no IP address, no user agent, no visitor identifiers.
 ANALYTICS_KEEP_DAYS = 400
 ANALYTICS_REFERRERS_PER_DAY = 200          # distinct referring hosts per day; the rest are counted as "other"
 SHOP_TZ = timezone(timedelta(hours=3))     # Asia/Riyadh (UTC+3 all year): the shop's calendar day for statistics
+# كلمات تدل على الزواحف ومعاينات الروابط؛ زياراتها لا تُحتسب في الإحصاءات.
 BOT_UA_RE = re.compile(r"bot|crawl|spider|slurp|facebookexternalhit|whatsapp|preview", re.I)
+# اسم نطاق صالح فقط (حروف صغيرة وأرقام وشرطات ونقاط، طوله 3 إلى 253): يمنع تخزين قيم غريبة من Referer مزوَّر.
 REFERRER_HOST_RE = re.compile(r"(?=.{3,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
 # Google Analytics 4 hosts (Google's documented CSP for GA4), added only to public storefront pages and only once the
 # owner set a measurement ID. The admin panel never gets them.
@@ -141,6 +189,10 @@ GA_SCRIPT_SRC = "https://www.googletagmanager.com"
 GA_CONNECT_SRC = "https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com"
 
 
+# ---- سياسة أمان المحتوى CSP ----
+# تبني ترويسة Content-Security-Policy لكل صفحة HTML. nonce قيمة عشوائية جديدة لكل استجابة تسمح فقط بالسكربتات
+# وبلوكات <style> التي تحملها (لا 'unsafe-inline')، فلا يُنفَّذ أي سكربت محقون. frame-ancestors 'none' يمنع
+# التضمين في إطار.
 def build_csp(nonce: str, secure: bool, analytics: bool = False) -> str:
     """No 'unsafe-inline' for scripts or <style> blocks: only our own files and tags carrying this response's nonce.
     Style *attributes* (style="...") stay allowed; they cannot run code.
@@ -153,6 +205,9 @@ def build_csp(nonce: str, secure: bool, analytics: bool = False) -> str:
         parts.append("upgrade-insecure-requests")
     return "; ".join(parts)
 
+# ---- البيانات الأولية: الأقسام والمنتجات التجريبية والإعدادات الافتراضية ----
+# الأقسام الافتراضية (slug, الاسم، الترتيب). تُدرج عند الإقلاع بـ INSERT OR IGNORE فلا تتكرر ولا يُستبدل ما
+# عدّله المدير.
 CATEGORIES = [
     ("curtains", "ستائر تفصيل", 1),
     ("roller", "ستائر رول", 2),
@@ -172,6 +227,7 @@ LEGACY_SAMPLES = {
 # prices for them, so price is 0, which the storefront and admin display as "price on request" (set after measuring).
 WAVY_DESCRIPTION = ("ستائر ويفي بطيّات متموجة تُفصَّل حسب الطلب. يتحدد السعر النهائي بحسب المقاس والخامة واللون؛ "
                     "تواصل مع المتجر لمعاينة الخيارات وتأكيد التكلفة.")
+# النص البديل (alt) لكل صورة ويفي بالترتيب؛ طوله يحدد عدد الموديلات المزروعة (18).
 WAVY_ALTS = [
     "ستائر ويفي رمادية مع شيفون لنافذة بانورامية بثلاثة أقسام",
     "ستائر ويفي رمادية مع شيفون أبيض لنافذة كبيرة",
@@ -192,6 +248,9 @@ WAVY_ALTS = [
     "ستائر ويفي رمادية فاتحة مع شيفون لنافذة",
     "ستائر ويفي بيج مع شيفون لنافذة بثلاثة أقسام",
 ]
+# الإعدادات الافتراضية لجدول settings (مفتاح -> قيمة نصية). تُدرج بـ INSERT OR IGNORE: ما غيّره المدير لا
+# يُستبدل أبدًا.
+# بيانات المتجر الثابتة (العنوان والهاتف) تُعرض في الموقع كما هي هنا ما لم يغيّرها المدير من لوحة الإدارة.
 DEFAULT_SETTINGS = {
     "store_name": "الفخامة للأقمشة والستائر",
     "tagline": "تفصيل ستائر وأقمشة في جدة",
@@ -218,6 +277,7 @@ DEFAULT_SETTINGS = {
     "ga4_id": "",
     "google_site_verification": "",
 }
+# حالات الطلب المسموحة (المفتاح المخزَّن -> التسمية العربية). أي حالة أخرى يرفضها PATCH /api/admin/orders/<id>.
 ORDER_STATUSES = {
     "new": "جديد",
     "confirmed": "تم التأكيد",
@@ -243,6 +303,7 @@ except Exception as _exc:  # خطأ في إعداد النسخ الخارجي ل
 SITE_READY_DEFAULT = os.environ.get("SITE_READY_DEFAULT", "") == "1"
 
 
+# تحدد أين تُخزَّن البيانات فعليًا لتحذير المدير: s3 / disk / ephemeral.
 def persistence_mode() -> str:
     """s3 = لقطات خارجية، disk = DATA_DIR على قرص دائم (جهاز مختلف عن /)، ephemeral = يُمسح مع الحاوية."""
     if PERSIST.enabled:
@@ -267,6 +328,9 @@ def storage_info() -> dict:
     return {"mode": mode, "blocked": bool(PERSIST.enabled and PERSIST.blocked), "last_snapshot": PERSIST.last_snapshot, "warning": warning}
 
 
+# ---- الأخطاء وقاعدة البيانات والمصادقة ----
+# استثناء يحمل رسالة عربية ورمز حالة HTTP (وترويسات/حقول اختيارية). يلتقطه _run/route ويحوّله إلى JSON {"error":
+# ...}.
 class APIError(Exception):
     def __init__(self, message: str, status: int = 400, headers: dict | None = None, extra: dict | None = None):
         super().__init__(message)
@@ -276,6 +340,9 @@ class APIError(Exception):
         self.extra = extra or {}
 
 
+# مدير سياق يفتح اتصال SQLite جديدًا لكل عملية: commit عند النجاح، rollback عند أي استثناء، وإغلاق دائمًا.
+# foreign_keys=ON ضروري لأن SQLite يتجاهل المفاتيح الأجنبية افتراضيًا. busy_timeout ينتظر 20 ثانية بدل الفشل
+# الفوري.
 @contextmanager
 def connect_db(analytics_only: bool = False):
     """analytics_only=True للكتابة في إحصاءات الزيارات فقط: تُحفظ خارجيًا بوتيرة أبطأ حتى لا يُغرق الزوار المخزن بالرفع."""
@@ -296,22 +363,28 @@ def connect_db(analytics_only: bool = False):
         conn.close()
 
 
+# يسجل نشاط المدير في audit_log (من/ماذا/متى/من أي IP) ويقص القيم الطويلة. لا يُسجَّل فيه أي سر. يُبقي آخر 5000
+# سجل.
 def audit(conn: sqlite3.Connection, actor: str, action: str, detail: str = "", ip: str = "") -> None:
     """Accountability trail of admin activity (who/what/when/from where). Never records passwords, codes or tokens."""
     conn.execute("INSERT INTO audit_log(at,actor,action,detail,ip) VALUES(?,?,?,?,?)", (now_iso(), actor[:100], action[:60], detail[:300], ip[:64]))
     conn.execute("DELETE FROM audit_log WHERE id <= (SELECT MAX(id) FROM audit_log) - 5000")
 
 
+# الوقت الحالي بتوقيت UTC بصيغة ISO دون كسور الثانية؛ هكذا تُخزَّن كل التواريخ في القاعدة.
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# تجزئة كلمة المرور بـ PBKDF2-HMAC-SHA256 مع ملح عشوائي 16 بايت و310000 دورة؛ الناتج "salt_hex$hash_hex".
+# التجزئة البطيئة عمدًا تُصعّب تخمين كلمات المرور لو سُرّبت القاعدة.
 def hash_password(password: str, salt: bytes | None = None) -> str:
     salt = salt or secrets.token_bytes(16)
     derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 310_000)
     return f"{salt.hex()}${derived.hex()}"
 
 
+# يعيد حساب التجزئة بنفس الملح ويقارنها بـ hmac.compare_digest (مقارنة بزمن ثابت تمنع هجمات التوقيت).
 def verify_password(password: str, encoded: str) -> bool:
     try:
         salt_hex, expected = encoded.split("$", 1)
@@ -321,13 +394,26 @@ def verify_password(password: str, encoded: str) -> bool:
         return False
 
 
+# ---- إنشاء القاعدة وترقيتها وزرع البيانات ----
+# تُستدعى عند كل إقلاع وهي آمنة للتكرار (IF NOT EXISTS / INSERT OR IGNORE). تنشئ الجداول، وتضيف أعمدة الإصدارات
+# الأقدم،
+# وتزرع الأقسام والإعدادات، وتنشئ حساب المدير عند أول تشغيل. تعيد كلمة المرور المولّدة فقط إن لم تُضبط
+# ADMIN_PASSWORD.
 def init_db() -> str | None:
     """Create the schema and seed data. Returns the generated admin password on first run, else None."""
     generated_password: str | None = None
     with connect_db() as conn:
+        # وضع WAL يسمح بالقراءة أثناء الكتابة. ونتحقق هل القاعدة جديدة تمامًا (لا جدول settings) لتطبيق
+        # SITE_READY_DEFAULT مرة واحدة.
         conn.execute("PRAGMA journal_mode = WAL")
         # قاعدة جديدة تماما = لا جدول settings بعد؛ فقط حينها نطبّق SITE_READY_DEFAULT.
         fresh_db = not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'").fetchone()
+        # مخطط الجداول: categories (الأقسام) و products (المنتجات) و product_images (معرض الصور) و audit_log
+        # (سجل النشاط)
+        # و settings (إعدادات مفتاح/قيمة) و admins (حسابات المدير) و orders/order_items (الطلبات وبنودها) و
+        # messages (رسائل التواصل)
+        # و page_views/referrers (إحصاءات يومية مجمّعة). order_items يحفظ اسم المنتج وسعره وقت الشراء فلا يتغير
+        # الطلب القديم بتعديل المنتج.
         conn.executescript("""
           CREATE TABLE IF NOT EXISTS categories (
             slug TEXT PRIMARY KEY,
@@ -431,18 +517,24 @@ def init_db() -> str | None:
             PRIMARY KEY (day, host)
           ) WITHOUT ROWID;
         """)
+        # ترقية قواعد الإصدارات الأقدم: نضيف الأعمدة الناقصة بـ ALTER TABLE (الأسماء ثوابت داخل الشيفرة وليست
+        # مدخلات مستخدم).
         for table, column, ddl in (("categories", "image", "TEXT NOT NULL DEFAULT ''"),
                                    ("categories", "description", "TEXT NOT NULL DEFAULT ''"),
                                    ("orders", "consent_at", "TEXT NOT NULL DEFAULT ''"),
                                    ("admins", "totp_secret", "TEXT NOT NULL DEFAULT ''")):
             if column not in {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        # زرع الأقسام والإعدادات الافتراضية دون استبدال ما يوجد. site_ready=1 فقط لقاعدة جديدة تمامًا وعند ضبط
+        # SITE_READY_DEFAULT.
         for slug, name, order in CATEGORIES:
             conn.execute("INSERT OR IGNORE INTO categories(slug,name,sort_order,active) VALUES(?,?,?,1)", (slug, name, order))
         for key, value in DEFAULT_SETTINGS.items():
             if key == "site_ready" and fresh_db and SITE_READY_DEFAULT:
                 value = "1"
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
+        # تنظيف لمرة واحدة (علامة sample_cleanup_v1): حذف المنتجات التجريبية القديمة إن بقيت دون تعديل، أو
+        # إخفاؤها إن ارتبطت بطلب.
         if not conn.execute("SELECT 1 FROM settings WHERE key='sample_cleanup_v1'").fetchone():
             for slug, (name, price) in LEGACY_SAMPLES.items():
                 row = conn.execute("SELECT id FROM products WHERE slug=? AND name=? AND price=? AND (image LIKE '/assets/%' OR image LIKE 'assets/%')", (slug, name, price)).fetchone()
@@ -453,6 +545,7 @@ def init_db() -> str | None:
                 else:
                     conn.execute("DELETE FROM products WHERE id=?", (row["id"],))
             conn.execute("INSERT INTO settings(key,value) VALUES('sample_cleanup_v1','1')")
+        # زرع صور الستائر الويفي الحقيقية مرة واحدة (علامة seed_wavy_v1) كمنتجات بسعر 0 أي "السعر عند الطلب".
         seeded = conn.execute("SELECT value FROM settings WHERE key='seed_wavy_v1'").fetchone()
         if not seeded:
             ts = now_iso()
@@ -463,6 +556,7 @@ def init_db() -> str | None:
                              (f"ستائر ويفي تفصيل حسب الطلب — موديل {number}", f"wavy-{number:02d}", "curtains", WAVY_DESCRIPTION,
                               f"/assets/wavy-{number:02d}.jpg", WAVY_ALTS[number - 1], "تفصيل حسب الطلب", f"FAL-WAV-{number:03d}", ts, ts))
             conn.execute("INSERT INTO settings(key,value) VALUES('seed_wavy_v1','1')")
+        # يضمن أن لكل منتج صورة رئيسية في جدول المعرض، ثم يربط الصور المجمّعة بصورها المصغّرة.
         conn.execute("INSERT INTO product_images(product_id,path,thumb,position) SELECT id,image,'',0 FROM products "
                      "WHERE image!='' AND id NOT IN (SELECT product_id FROM product_images)")
         for row in conn.execute("SELECT id,path FROM product_images WHERE thumb='' AND path LIKE '/assets/wavy-%'").fetchall():
@@ -471,6 +565,9 @@ def init_db() -> str | None:
                 conn.execute("UPDATE product_images SET thumb=? WHERE id=?", (thumb, row["id"]))
         # Earlier versions stored relative image paths ("assets/x.jpg") that break under /admin/.
         conn.execute("UPDATE products SET image='/'||image WHERE image LIKE 'assets/%' OR image LIKE 'uploads/%'")
+        # أول تشغيل: لا يوجد مدير بعد، فننشئه من ADMIN_USERNAME/ADMIN_PASSWORD (أو بكلمة مرور عشوائية تُطبع مرة
+        # واحدة).
+        # تشغيلات لاحقة: نزامن بيانات البيئة مع الحساب الموجود إن تغيّرت (انظر sync_admin_credentials).
         admin = conn.execute("SELECT username FROM admins LIMIT 1").fetchone()
         if not admin:
             username = ADMIN_USERNAME.strip() or "admin"
@@ -491,6 +588,8 @@ def init_db() -> str | None:
 
 
 # -- admin credentials from the environment ----------------------------------------------------------------------------
+# مفتاح في جدول settings يحفظ "بصمة" آخر بيانات مدير طُبّقت من البيئة. وADMIN_SYNC_RESULT نتيجة آخر مزامنة
+# (تُطبع عند الإقلاع).
 ADMIN_FP_KEY = "admin_cred_fp"
 ADMIN_SYNC_RESULT: dict = {"status": "not_run"}
 
@@ -506,6 +605,8 @@ def remember_admin_fingerprint(conn: sqlite3.Connection, username: str, password
                  (ADMIN_FP_KEY, credential_fingerprint(username, password)))
 
 
+# تطبق بيانات البيئة على المدير الموجود فقط عند تغيّرها، حتى لا تُلغى كلمة مرور غيّرها المدير من اللوحة بعد ذلك.
+# بعد التحديث تُمسح كل الجلسات (SESSIONS.clear()) ويبقى سر الخطوتين كما هو. لا تعيد كلمة المرور ولا تسجلها.
 def sync_admin_credentials(conn: sqlite3.Connection, username: str, password: str, force: bool = False) -> dict:
     """Apply ADMIN_USERNAME / ADMIN_PASSWORD to the existing admin row when they differ from the values applied last time
     (compared through a keyed fingerprint, so a password the admin later changed in the panel is NOT overwritten while the
@@ -543,6 +644,8 @@ def sync_admin_credentials(conn: sqlite3.Connection, username: str, password: st
 
 
 # -- first-party statistics -------------------------------------------------------------------------------------------
+# ---- الإحصاءات الداخلية: عدّادات يومية فقط ----
+# اليوم بتوقيت جدة (UTC+3) لا UTC، حتى يطابق يوم صاحب المتجر.
 def shop_today(now: datetime | None = None):
     """The shop's calendar date (Jeddah time) - statistics days follow the owner's day, not UTC."""
     return (now or datetime.now(timezone.utc)).astimezone(SHOP_TZ).date()
@@ -560,6 +663,8 @@ def record_page_view(path: str, referrer: str | None) -> None:
     day = shop_today().isoformat()
     with connect_db(analytics_only=True) as conn:
         conn.execute("PRAGMA synchronous = NORMAL")  # WAL + NORMAL: a cheap commit; a power cut may lose the last few counts
+        # ON CONFLICT ... DO UPDATE = "UPSERT": زيادة العدّاد إن وُجد الصف وإنشاؤه بقيمة 1 إن لم يوجد، بدل
+        # SELECT ثم UPDATE.
         conn.execute("INSERT INTO page_views(day,path,views) VALUES(?,?,1) ON CONFLICT(day,path) DO UPDATE SET views=views+1",
                      (day, path[:300]))
         if referrer:
@@ -571,11 +676,14 @@ def record_page_view(path: str, referrer: str | None) -> None:
                          (day, referrer))
 
 
+# تقرير الزيارات للوحة المدير. الفترة تُعبّأ بالأصفار للأيام الخالية، والبيانات تُجمع بـ SQL (GROUP BY) لا
+# بحلقات بايثون.
 def analytics_report(days: int, now: datetime | None = None) -> dict:
     """GET /api/admin/analytics: daily series for `days` days (oldest first, zero-filled), totals for today / 7 / 30 days,
     top pages, top products and referring hosts over the period, plus orders and contact messages of the last 30 days."""
     now = now or datetime.now(timezone.utc)
     today = shop_today(now)
+    # أول يوم في نافذة طول n يومًا تنتهي اليوم (نص ISO).
     first = lambda n: (today - timedelta(days=n - 1)).isoformat()  # noqa: E731 - first day of an n-day window ending today
     start = first(days)
     with connect_db() as conn:
@@ -609,6 +717,9 @@ def analytics_report(days: int, now: datetime | None = None) -> dict:
 DASHBOARD_RANGES = (7, 30, 90)
 
 
+# تقرير لوحة التحكم: عدّادات وإيرادات وأفضل المنتجات والمخزون المنخفض وآخر الطلبات، مع مقارنة الفترة بالسابقة
+# لها.
+# الإيراد المعروف يستثني الملغي والطلبات التي فيها بند "السعر عند الطلب" لأن مجموعها غير نهائي.
 def dashboard_report(days: int, now: datetime | None = None) -> dict:
     """GET /api/admin/dashboard?range=7|30|90. Days follow the shop's calendar (Asia/Riyadh). Counts include every order
     placed in the window; revenue only sums orders whose total is known (no "price on request" line, total > 0, not cancelled)."""
@@ -617,6 +728,7 @@ def dashboard_report(days: int, now: datetime | None = None) -> dict:
     first = today - timedelta(days=days - 1)
     prev_first = first - timedelta(days=days)
 
+    # بداية يوم بتوقيت المتجر مُحوَّلة إلى UTC (نص ISO) لمقارنتها بـ created_at المخزَّن بـ UTC.
     def utc_start(day) -> str:
         return datetime(day.year, day.month, day.day, tzinfo=SHOP_TZ).astimezone(timezone.utc).isoformat(timespec="seconds")
 
@@ -704,18 +816,22 @@ def dashboard_report(days: int, now: datetime | None = None) -> dict:
     }
 
 
+# ---- دوال مساعدة للبيانات والتحقق ----
+# كل الإعدادات: الافتراضيات ثم القيم المخزّنة فوقها. نستثني مفتاح بصمة المدير الداخلي حتى لا يظهر في أي استجابة.
 def get_settings(conn: sqlite3.Connection) -> dict:
     data = DEFAULT_SETTINGS.copy()
     data.update({row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings WHERE key<>?", (ADMIN_FP_KEY,))})
     return data
 
 
+# يحوّل الاسم إلى slug صالح في الرابط (يدعم العربية \w بعد تطبيع NFKC). إن فرغ الناتج يُولَّد اسم عشوائي.
 def slugify(value: str) -> str:
     value = unicodedata.normalize("NFKC", value).strip().lower()
     value = re.sub(r"[^\w\-]+", "-", value, flags=re.UNICODE).strip("-")
     return value[:110] or f"product-{secrets.token_hex(4)}"
 
 
+# يحوّل قيمة واردة إلى عدد صحيح ضمن [minimum, maximum] وإلا يرفع APIError بالتسمية العربية.
 def int_field(value, label: str, minimum: int = 0, maximum: int = 100_000_000) -> int:
     try:
         number = int(value)
@@ -726,6 +842,11 @@ def int_field(value, label: str, minimum: int = 0, maximum: int = 100_000_000) -
     return number
 
 
+# يحفظ صورة مرفوعة بصيغة data URI (base64) في uploads/ ويعيد مسارها. فحوص الأمان: النوع من الترويسة محصور في
+# jpeg/png/webp،
+# فك base64 صارم (validate=True)، حد الحجم 5 ميغابايت، ثم فحص "البايتات السحرية" لمحتوى الملف نفسه حتى لا يُرفع
+# ملف آخر
+# باسم صورة. الاسم الجديد uuid عشوائي (لا يُستخدم اسم الملف الذي أرسله المستخدم).
 def save_image_data(data_uri: str) -> str:
     if not isinstance(data_uri, str) or "," not in data_uri:
         raise APIError("تعذر قراءة الصورة.")
@@ -772,6 +893,8 @@ def image_file_exists(url: str) -> bool:
     return (root / url.split("/", 2)[2]).is_file()
 
 
+# يجلب معارض عدة منتجات باستعلام واحد (تفادي استعلام لكل منتج). علامات ? تُبنى من العدد فقط والقيم تُمرَّر
+# كمعاملات آمنة.
 def images_for(conn: sqlite3.Connection, product_ids: list[int]) -> dict[int, list[dict]]:
     """Gallery of every product in one query: {product_id: [{"url","thumb"}, ...]} in display order."""
     result: dict[int, list[dict]] = {pid: [] for pid in product_ids}
@@ -786,6 +909,7 @@ def images_for(conn: sqlite3.Connection, product_ids: list[int]) -> dict[int, li
 MAX_GALLERY = 12
 
 
+# يحذف ملف الرفع من القرص إن لم يعد يستخدمه أي منتج أو قسم. لا تُحذف ملفات assets/ المرفقة بالمشروع أبدًا.
 def drop_unreferenced_uploads(conn: sqlite3.Connection, paths) -> None:
     """Delete uploaded files (never bundled assets) that no product or category uses any more."""
     for path in {p for p in paths if p and p.startswith("/uploads/")}:
@@ -856,6 +980,9 @@ def message_dict(row: sqlite3.Row) -> dict:
             "created_at": row["created_at"], "handled_at": row["handled_at"], "consent_at": row["consent_at"]}
 
 
+# تنظيف رسالة نموذج التواصل: تطبيع Unicode وإزالة الأحرف غير المرئية وأحرف التحكم (مع إبقاء السطر الجديد في نص
+# الرسالة)،
+# ثم التحقق من الاسم والجوال والبريد والموافقة على الخصوصية. الأرقام العربية الهندية تُحوَّل لأرقام عادية.
 def clean_message(data: dict) -> dict:
     """Validate a contact-form submission. Raises APIError (400) with an Arabic message; returns the values to store."""
     def text(key: str, multiline: bool = False) -> str:
@@ -912,6 +1039,9 @@ def clean_google_settings(data: dict) -> dict:
     return result
 
 
+# ---- الجلسات وتحديد المحاولات (كلها في الذاكرة) ----
+# SESSIONS: رمز الجلسة -> بياناتها. باقي القواميس: أزمنة المحاولات لكل مفتاح (IP أو اسم حساب).
+# كلها تُفقد عند إعادة تشغيل الخادم، فيُطلب من المدير تسجيل الدخول من جديد.
 SESSIONS: dict[str, dict] = {}
 LOGIN_FAILURES: dict[str, list[float]] = {}
 ACCOUNT_FAILURES: dict[str, list[float]] = {}
@@ -929,6 +1059,9 @@ def purge_expired(table: dict, horizon: float, key_expires: bool = False) -> Non
             table.pop(key, None)
 
 
+# محدِّد معدل بنافذة منزلقة: يحتفظ بأزمنة المحاولات الأخيرة ضمن window ثانية، ويرفض إن بلغت limit. المحاولة
+# المقبولة تُسجَّل.
+# الحد 5000 مفتاح يمنع نمو الجدول بلا حدود.
 def allow_attempt(table: dict[str, list[float]], key: str, limit: int, window: int) -> bool:
     """Sliding-window limiter. Records the attempt and returns False when `key` is over `limit`."""
     now = time.time()
@@ -943,6 +1076,8 @@ def allow_attempt(table: dict[str, list[float]], key: str, limit: int, window: i
     return True
 
 
+# ---- معالج الطلبات StoreHandler ----
+# يُنشأ كائن منه لكل طلب HTTP (ThreadingHTTPServer يعالج كل طلب في خيط). يحوي دوال الإرسال والجلسات والتوجيه.
 class StoreHandler(BaseHTTPRequestHandler):
     server_version = "FakhamahStore"
     sys_version = ""
@@ -952,6 +1087,7 @@ class StoreHandler(BaseHTTPRequestHandler):
     audited = False
     audit_detail = ""
 
+    # سجل الطلبات: النص العادي افتراضيًا، أو JSON مع رقم الطلب rid والمدة بالميلي ثانية عند LOG_FORMAT=json.
     def log_request(self, code="-", size="-") -> None:
         if not LOG_JSON:
             return super().log_request(code, size)
@@ -966,6 +1102,9 @@ class StoreHandler(BaseHTTPRequestHandler):
         else:
             sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
+    # عنوان العميل لتحديد المعدل والسجل. خلف وكيل موثوق (TRUST_PROXY=1) نأخذ آخر عنصر في X-Forwarded-For لأنه
+    # الذي أضافه
+    # وكيلنا؛ العناصر السابقة يستطيع العميل تزويرها. بدون TRUST_PROXY نتجاهل هذه الترويسة تمامًا.
     def client_ip(self) -> str:
         if TRUST_PROXY:
             # The right-most entry is the one appended by our own proxy; earlier ones can be forged.
@@ -974,9 +1113,12 @@ class StoreHandler(BaseHTTPRequestHandler):
                 return forwarded[:64]
         return self.client_address[0]
 
+    # هل وصل الطلب عبر HTTPS؟ نصدّق X-Forwarded-Proto فقط خلف وكيل موثوق؛ يتحكم بوسم Secure وترويسة HSTS.
     def is_secure(self) -> bool:
         return TRUST_PROXY and self.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower() == "https"
 
+    # أصل الموقع (https://نطاق) لبناء الروابط المطلقة: PUBLIC_BASE_URL إن ضُبط، وإلا ترويسة Host بعد التحقق منها
+    # بـ HOST_RE.
     def base_url(self) -> str:
         if PUBLIC_BASE_URL:
             return PUBLIC_BASE_URL
@@ -985,6 +1127,8 @@ class StoreHandler(BaseHTTPRequestHandler):
             host = f"localhost:{PORT}"
         return f"{'https' if self.is_secure() else 'http'}://{host}"
 
+    # ترويسات الأمان والتخزين المؤقت لكل استجابة: منع تخمين نوع المحتوى (nosniff) ومنع الإطارات وعزل الأصول،
+    # Cache-Control: no-store افتراضيًا، وCSP لصفحات HTML، وnoindex للوحة الإدارة وواجهتها، وHSTS عند HTTPS فقط.
     def base_headers(self, content_type: str, nonce: str | None = None, analytics: bool = False) -> dict:
         """Security and caching headers every response carries (callers may override some, e.g. Cache-Control)."""
         path = urlsplit(self.path).path
@@ -1009,6 +1153,9 @@ class StoreHandler(BaseHTTPRequestHandler):
             out["Strict-Transport-Security"] = "max-age=15552000"
         return out
 
+    # الإرسال المركزي لكل استجابة: يضيف الترويسات، ويدعم 304 عبر ETag/If-None-Match، ويضغط gzip النصوص الأكبر من
+    # 800 بايت،
+    # ويسجل تغييرات المدير في audit قبل إرسال الرد، ثم يكتب الجسم (ما عدا HEAD و304).
     def _send(self, status: int, body: bytes, content_type: str = "application/json; charset=utf-8", headers: dict | None = None,
               nonce: str | None = None, analytics: bool = False) -> None:
         out = self.base_headers(content_type, nonce, analytics)
@@ -1065,6 +1212,8 @@ class StoreHandler(BaseHTTPRequestHandler):
         """Send an HTML page whose <script>/<style> tags carry a fresh CSP nonce (no 'unsafe-inline').
         analytics=True: a storefront page of a shop with a GA4 ID (its CSP also allows Google Analytics)."""
         nonce = secrets.token_urlsafe(16)
+        # يضيف nonce الاستجابة إلى كل وسم <script> و<style> لا يحمل nonce أصلًا (lookahead سلبي)، ليتوافق مع
+        # سياسة CSP الصارمة.
         markup = re.sub(r"<(script|style)(?![^>]*\bnonce=)", lambda m: f'<{m.group(1)} nonce="{nonce}"', markup)
         self._send(status, markup.encode("utf-8"), "text/html; charset=utf-8", {"Cache-Control": "no-cache", **(headers or {})},
                    nonce=nonce, analytics=analytics)
@@ -1117,6 +1266,8 @@ class StoreHandler(BaseHTTPRequestHandler):
         except Exception:
             traceback.print_exc()  # statistics must never break a page
 
+    # ---- قراءة الطلب والجلسات ----
+    # يقرأ جسم JSON بعد فحص Content-Length مقابل الحد (413 إن تجاوزه) ويتأكد أن الناتج كائن (dict).
     def read_json(self, limit: int | None = None) -> dict:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -1133,6 +1284,9 @@ class StoreHandler(BaseHTTPRequestHandler):
             raise APIError("صيغة بيانات الطلب غير صالحة.", 400)
         return data
 
+    # يجد جلسة المدير من الكوكي fakhama_admin. تنتهي الجلسة عند تجاوز عمرها المطلق أو خمول أكثر من
+    # SESSION_IDLE_TTL،
+    # وكل طلب ناجح يجدّد last_active. تعيد (الرمز, الجلسة) والجلسة None إن لم تصح.
     def get_session(self) -> tuple[str | None, dict | None]:
         cookie = SimpleCookie()
         try:
@@ -1155,6 +1309,9 @@ class StoreHandler(BaseHTTPRequestHandler):
         session["last_active"] = now
         return token, session
 
+    # حارس مسارات المدير: 401 بلا جلسة. وللكتابة (write=True) يلزم تطابق ترويسة X-CSRF-Token مع رمز الجلسة
+    # (حماية CSRF)
+    # بمقارنة بزمن ثابت. تعيد None بعد إرسال الخطأ بنفسها، فيكفي المستدعي أن يخرج.
     def require_admin(self, write: bool = False) -> dict | None:
         token, session = self.get_session()
         if not session:
@@ -1165,6 +1322,9 @@ class StoreHandler(BaseHTTPRequestHandler):
             return None
         return {"token": token, **session}
 
+    # نقطة الدخول المشتركة لكل الأفعال: ترقيم الطلب، التوجيه، وتحويل APIError إلى JSON. أي استثناء غير متوقع
+    # يُطبع في السجل
+    # ويُرجع للعميل رسالة عامة 500 دون تفاصيل داخلية.
     def _run(self) -> None:
         self.request_id = uuid.uuid4().hex[:16]
         self.started = time.time()
@@ -1184,6 +1344,7 @@ class StoreHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    # كل أفعال HTTP تمر عبر _run.
     def do_GET(self): self._run()
     def do_POST(self): self._run()
     def do_PUT(self): self._run()
@@ -1191,6 +1352,9 @@ class StoreHandler(BaseHTTPRequestHandler):
     def do_DELETE(self): self._run()
     def do_HEAD(self): self._run()
 
+    # ---- الطلبات العامة (بدون تسجيل دخول) ----
+    # POST /api/orders. السعر والمجموع يُحسبان دائمًا من القاعدة لا من بيانات المتصفح، فلا يستطيع العميل تغيير
+    # الأسعار.
     def create_order(self) -> None:
         # Idempotency-Key: a retry of the same submission (flaky mobile network) returns the first result instead of
         # creating a second order.
@@ -1202,6 +1366,7 @@ class StoreHandler(BaseHTTPRequestHandler):
             IDEMPOTENT_ORDERS.pop(stale, None)
         if key and key in IDEMPOTENT_ORDERS:
             self.send_json(IDEMPOTENT_ORDERS[key][1], 200, {"Idempotent-Replayed": "true"}); return
+        # تحديد المعدل: كل محاولة لهذا الـ IP تُحسب (حتى غير الصالحة) ضمن ORDER_LIMIT.
         if not allow_attempt(ORDER_ATTEMPTS, self.client_ip(), *ORDER_LIMIT):
             raise APIError("تم إرسال طلبات كثيرة خلال وقت قصير. حاول بعد قليل أو تواصل مع المتجر هاتفيًا.", 429, {"Retry-After": str(ORDER_LIMIT[1])})
         data = self.read_json()
@@ -1219,6 +1384,7 @@ class StoreHandler(BaseHTTPRequestHandler):
         items = data.get("items")
         if not isinstance(items, list) or not items or len(items) > 40:
             raise APIError("أضف منتجًا واحدًا على الأقل إلى السلة.")
+        # دمج البنود المكررة لنفس المنتج في كمية واحدة، مع حدود: 40 بندًا و50 قطعة للبند.
         quantities: dict[int, int] = {}
         for item in items:
             if not isinstance(item, dict): raise APIError("بيانات المنتجات غير صحيحة.")
@@ -1226,6 +1392,9 @@ class StoreHandler(BaseHTTPRequestHandler):
             quantity = int_field(item.get("quantity", item.get("qty")), "الكمية", 1, 50)
             quantities[product_id] = quantities.get(product_id, 0) + quantity
         with connect_db() as conn:
+            # BEGIN IMMEDIATE يأخذ قفل الكتابة فورًا، فلا يستطيع طلبان متزامنان قراءة نفس المخزون ثم خصمه معًا
+            # (تفادي البيع الزائد).
+            # أي استثناء بعدها يُلغي كل شيء تلقائيًا عبر rollback في connect_db.
             conn.execute("BEGIN IMMEDIATE")
             subtotal = 0
             products = []
@@ -1239,6 +1408,8 @@ class StoreHandler(BaseHTTPRequestHandler):
             delivery_fee = int(settings.get("delivery_fee", "0") or 0)
             total = subtotal + delivery_fee
             created = now_iso()
+            # يُدرج الطلب برقم مؤقت 'PENDING' لأن الرقم النهائي يعتمد على المعرّف الذي تولّده القاعدة، ثم
+            # يُحدَّث أدناه (MH-yymmdd-NNNNN).
             cursor = conn.execute("""INSERT INTO orders(order_number,customer_name,phone,city,address,notes,status,subtotal,delivery_fee,total,created_at,updated_at,consent_at)
                                       VALUES('PENDING',?,?,?,?,?,'new',?,?,?,?,?,?)""",
                                   (name, phone, city, address, notes, subtotal, delivery_fee, total, created, created, created))
@@ -1249,6 +1420,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                 conn.execute("INSERT INTO order_items(order_id,product_id,product_name,sku,unit_price,quantity) VALUES(?,?,?,?,?,?)",
                              (order_id, row["id"], row["name"], row["sku"], row["price"], quantity))
                 conn.execute("UPDATE products SET stock=stock-?,updated_at=? WHERE id=?", (quantity, created, row["id"]))
+        # نحفظ النتيجة لمفتاح التكرار فإن أعاد العميل الإرسال (شبكة ضعيفة) حصل على نفس الرد بلا طلب مكرر.
         result = {"ok": True, "order_id": order_id, "order_number": order_number, "subtotal": subtotal,
                   "delivery_fee": delivery_fee, "total": total}
         if key:
@@ -1291,6 +1463,8 @@ class StoreHandler(BaseHTTPRequestHandler):
                 data["consent"] = data.get("consent", "") in ("1", "on", "true", "yes")
             else:
                 data = self.read_json(CONTACT_MAX_BODY)
+            # حقل فخ مخفي عن الزوار (honeypot): الروبوتات تملؤه فتُقبل رسالتها ظاهريًا دون حفظ أي شيء، فلا تعرف
+            # أنها كُشفت.
             honeypot = data.get("website")
             if isinstance(honeypot, str) and honeypot.strip():
                 values = None
@@ -1314,6 +1488,8 @@ class StoreHandler(BaseHTTPRequestHandler):
             return self.serve_contact(notice=("success", "شكرًا لك، وصلت رسالتك إلى المتجر. للاستفسار العاجل اتصل بالمتجر هاتفيًا."))
         self.send_json({"ok": True}, 201)
 
+    # تصدير الطلبات إلى CSV (للمدير فقط، يُتحقق في route_read_only). البادئة \ufeff (BOM) تجعل Excel يقرأ
+    # العربية بشكل صحيح.
     def export_orders(self) -> None:
         with connect_db() as conn:
             rows = conn.execute("SELECT * FROM orders ORDER BY id DESC").fetchall()
@@ -1345,6 +1521,9 @@ class StoreHandler(BaseHTTPRequestHandler):
                 return target, None
         return None
 
+    # ---- صفحات المتجر المولَّدة من الخادم ----
+    # كل دالة serve_* تقرأ البيانات من القاعدة ثم تبني الصفحة عبر render_page (الغلاف المشترك) مع بيانات SEO
+    # المنظمة JSON-LD.
     def serve_home(self) -> None:
         """The storefront home page (/ and /index.html) with its <head> written by the server and the FAQ from pages.FAQ."""
         template = (BASE_DIR / "index.html").read_text(encoding="utf-8")
@@ -1495,6 +1674,8 @@ class StoreHandler(BaseHTTPRequestHandler):
         self.render_page(settings, page="faq", main=pages.render_faq(settings), path="/faq", meta=seo.page_meta("faq", settings),
                          schemas=[seo.breadcrumb_schema(base, [(seo.HOME_LABEL, "/"), ("الأسئلة الشائعة", "/faq")]), seo.faq_schema(pages.FAQ)])
 
+    # يحوّل المسار ذا الشرطة الأخيرة (/about/) إلى صيغته القياسية لتفادي صفحات مكررة في محركات البحث (يُستخدم مع
+    # 301).
     @staticmethod
     def canonical_redirect(path: str) -> str | None:
         """/about/ -> /about (and every other page path with trailing slashes); None when nothing to fix."""
@@ -1506,11 +1687,16 @@ class StoreHandler(BaseHTTPRequestHandler):
         match = re.fullmatch(r"/(category|product)/([^/]+)", stripped)
         return f"/{match.group(1)}/{quote(match.group(2), safe='')}" if match else None
 
+    # يفرّق بين رابط صفحة (يستحق صفحة 404 منسّقة) ورابط ملف أو مجلد ثابت (404 نصية بسيطة).
     @staticmethod
     def is_page_path(path: str) -> bool:
         """Paths that get the branded 404: page-like URLs, not files (no extension) and not the static folders."""
         return path.startswith("/") and not path.startswith(STATIC_PREFIXES) and "." not in path.rsplit("/", 1)[-1] and "\x00" not in path
 
+    # موجّه الصفحات والملفات لطلبات GET/HEAD: الرئيسية، إعادة توجيه 301 لإزالة الشرطة المائلة الأخيرة، صفحات
+    # المتجر والسياسات،
+    # لوحة الإدارة، ثم الملفات الثابتة مع سياسة تخزين مؤقت لكل نوع. ما لا يُعرف يعطي 404 منسّقة للصفحات و404
+    # نصية للملفات.
     def serve_static(self, path: str) -> None:
         if path in ("/", "/index.html"):
             return self.serve_home()
@@ -1553,6 +1739,8 @@ class StoreHandler(BaseHTTPRequestHandler):
             stat = target.stat()
         except OSError:
             self._send(500, b"Unable to read file", "text/plain; charset=utf-8"); return
+        # سياسة التخزين المؤقت: uploads والخطوط ملفات لا تتغير (سنة، immutable)، وباقي assets/icons يوم واحد،
+        # والباقي (مثل sw.js والمانيفست) يُعاد التحقق منه دائمًا.
         headers = {"Last-Modified": formatdate(stat.st_mtime, usegmt=True), "ETag": f'W/"{stat.st_size}-{stat.st_mtime_ns}"'}
         if path.startswith("/uploads/"):
             headers["Cache-Control"] = "public, max-age=31536000, immutable"   # uploads get a random name: never reused
@@ -1562,10 +1750,17 @@ class StoreHandler(BaseHTTPRequestHandler):
             headers["Cache-Control"] = "public, max-age=86400"
         else:
             headers["Cache-Control"] = "no-cache"
+        # الـ service worker يحتاج هذه الترويسة ليتحكم بنطاق الموقع كله رغم وجوده في الجذر.
         if path == "/sw.js":
             headers["Service-Worker-Allowed"] = "/"
         self._send(200, body, content_type, headers)
 
+    # ---- تسجيل الدخول والجلسات وسجل التدقيق ----
+    # تسجيل دخول المدير. حمايتان من التخمين: 8 محاولات فاشلة لكل IP خلال 5 دقائق، و12 لكل اسم مستخدم خلال 15
+    # دقيقة (قفل مؤقت).
+    # عند تفعيل الخطوتين يلزم رمز TOTP أيضًا. النجاح يمسح العدّادات وينشئ جلسة برمز عشوائي ورمز CSRF ويضع
+    # كوكيين.
+    # رسالة الخطأ واحدة لاسم خاطئ وكلمة مرور خاطئة حتى لا يعرف المهاجم أي الحقلين صحيح.
     def handle_login(self, data: dict) -> None:
         username = str(data.get("username", "")).strip()[:100]
         password = str(data.get("password", ""))[:200]
@@ -1606,6 +1801,8 @@ class StoreHandler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "username": admin["username"], "csrf": csrf}, 200,
                        {"Set-Cookie": [self.session_cookie(token, SESSION_TTL), self.flag_cookie(SESSION_TTL)]})
 
+    # أنماط مسارات المدير التي تُسجَّل تلقائيًا في audit_log بعد نجاحها، مع اسم الإجراء (غيرها يسجّل نفسه داخل
+    # معالجه).
     AUDIT_ACTIONS = ((re.compile(r"/api/admin/settings"), "settings_update"), (re.compile(r"/api/admin/password"), "password_change"),
                      (re.compile(r"/api/admin/2fa/(setup|enable|disable)"), "two_factor"), (re.compile(r"/api/admin/categories"), "category_change"),
                      (re.compile(r"/api/admin/orders/\d+"), "order_status"))
@@ -1637,10 +1834,15 @@ class StoreHandler(BaseHTTPRequestHandler):
         secure = "; Secure" if self.is_secure() else ""
         return f"fakhama_admin_flag={'1' if max_age else ''}; Path=/; SameSite=Lax; Max-Age={max_age}{secure}"
 
+    # كوكي الجلسة: HttpOnly (لا تقرؤه سكربتات الصفحة) وSameSite=Lax (يحد من CSRF) وSecure عند HTTPS.
     def session_cookie(self, value: str, max_age: int) -> str:
         secure = "; Secure" if self.is_secure() else ""
         return f"fakhama_admin={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}"
 
+    # ---- حفظ المنتج ومسارات الإدارة ----
+    # إنشاء منتج (product_id=None) أو تعديله. يتحقق من الحقول والقسم، ويدير معرض الصور: images = صور قائمة تبقى
+    # بالترتيب،
+    # new_images = صور جديدة مرفوعة، والصورة الأولى هي الرئيسية. الحد الأقصى MAX_GALLERY صورة.
     def save_product(self, product_id: int | None, data: dict, session_user: str = "admin") -> None:
         name = str(data.get("name", "")).strip()[:140]
         category = str(data.get("category", "")).strip()[:100]
@@ -1663,6 +1865,8 @@ class StoreHandler(BaseHTTPRequestHandler):
             # which replaces the primary photo as before.
             existing_rows = conn.execute("SELECT path,thumb FROM product_images WHERE product_id=? ORDER BY position,id", (product_id,)).fetchall() if old else []
             existing = {public_image(r["path"]): r["thumb"] for r in existing_rows}
+            # صورة مقبولة: إما من معرض المنتج الحالي أو ملف موجود فعلًا تحت assets/ أو uploads/ (لا مسارات
+            # اعتباطية).
             def usable(url) -> str:
                 url = public_image(str(url or "").strip())
                 return url if url and (url in existing or image_file_exists(url)) else ""
@@ -1708,6 +1912,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                                    (name, slug, category, description, price, image, alt, badge, sku, stock, featured, active, ts, ts))
                 result_id = cur.lastrowid
+            # نستبدل صفوف المعرض بالكامل ثم نحذف من القرص الملفات المرفوعة التي لم يعد يستخدمها أحد.
             previous = [r["path"] for r in conn.execute("SELECT path FROM product_images WHERE product_id=? UNION SELECT thumb FROM product_images WHERE product_id=?", (result_id, result_id))]
             conn.execute("DELETE FROM product_images WHERE product_id=?", (result_id,))
             for position, (url, thumb) in enumerate(gallery):
@@ -1718,6 +1923,9 @@ class StoreHandler(BaseHTTPRequestHandler):
             audit(conn, session_user, "product_update" if product_id else "product_create", f"#{result_id} {name} ({len(gallery)} images)", self.client_ip())
         self.send_json({"ok": True, "product": product}, 200 if product_id else 201)
 
+    # موجّه الطلبات POST/PUT/DELETE: تسجيل الدخول والخروج، رفع الصور، المنتجات، الأقسام، الإعدادات، الخطوتين،
+    # كلمة المرور،
+    # حذف الرسائل. كل مسار إداري يبدأ بـ require_admin(write=True) أي جلسة صالحة + رمز CSRF. غير ذلك يعطي 404.
     def route_mutation(self) -> None:
         path = unquote(urlsplit(self.path).path)
         if path == "/api/admin/login" and self.command == "POST":
@@ -1778,6 +1986,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                 for position, slug in enumerate(order, 1):
                     conn.execute("UPDATE categories SET sort_order=? WHERE slug=?", (position, slug))
             self.send_json({"ok": True}); return
+        # مسار قسم محدد (slug قد يكون عربيًا لذلك re.UNICODE): تعديل PUT وحذف DELETE.
         match = re.fullmatch(r"/api/admin/categories/([\w\-]+)", path, re.UNICODE)
         if match and self.command == "PUT":
             if not self.require_admin(write=True): return
@@ -1811,6 +2020,7 @@ class StoreHandler(BaseHTTPRequestHandler):
         if path == "/api/admin/settings" and self.command == "PUT":
             if not self.require_admin(write=True): return
             data = self.read_json()
+            # حقول الإعدادات النصية المسموح تعديلها وأقصى طول لكل منها؛ أي مفتاح غير موجود هنا يُتجاهل.
             allowed = {"store_name": 100, "tagline": 160, "city": 100, "phone": 40, "whatsapp": 40, "address": 250, "map_url": 400, "delivery_note": 400, "instagram": 250, "seo_title": 180, "seo_description": 320, "hero_title": 180, "hero_copy": 600,
                        "about_title": 120, "about_body": 3000, "opening_hours": 300}
             for url_key in ("map_url", "instagram"):
@@ -1833,6 +2043,9 @@ class StoreHandler(BaseHTTPRequestHandler):
                     conn.execute("INSERT INTO settings(key,value) VALUES('delivery_fee',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(fee),))
                 settings = get_settings(conn)
             self.send_json({"ok": True, "settings": settings}); return
+        # ---- التحقق بخطوتين (TOTP) ----
+        # setup يولّد سرًّا مؤقتًا في الجلسة، enable يثبّته بعد التحقق من رمز صحيح من التطبيق، disable يطلب كلمة
+        # المرور والرمز معًا.
         if path == "/api/admin/2fa/setup" and self.command == "POST":
             session = self.require_admin(write=True)
             if not session: return
@@ -1894,6 +2107,7 @@ class StoreHandler(BaseHTTPRequestHandler):
             return
         self.send_json({"error": "المسار غير موجود."}, 404)
 
+    # موجّه PATCH: تغيير حالة رسالة تواصل، أو حالة طلب. تغيير حالة الطلب يُحدّث المخزون في نفس المعاملة.
     def route_patch(self) -> None:
         path = urlsplit(self.path).path
         message_match = re.fullmatch(r"/api/admin/messages/(\d{1,18})", path)
@@ -1919,11 +2133,14 @@ class StoreHandler(BaseHTTPRequestHandler):
         if new_status not in ORDER_STATUSES: raise APIError("حالة الطلب غير صالحة.")
         order_id = int(match.group(1))
         with connect_db() as conn:
+            # قفل الكتابة هنا أيضًا ليكون تغيير الحالة وتعديل المخزون عملية واحدة لا تتداخل مع طلب آخر.
             conn.execute("BEGIN IMMEDIATE")
             order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
             if not order: raise APIError("الطلب غير موجود.", 404)
             old_status = order["status"]
             lines = conn.execute("SELECT product_id,quantity FROM order_items WHERE order_id=?", (order_id,)).fetchall()
+            # إلغاء الطلب يُرجع الكميات للمخزون. وإعادة تفعيل طلب ملغي تخصم الكميات ثانية وترفض إن لم يكفِ
+            # المخزون.
             if old_status != "cancelled" and new_status == "cancelled":
                 for line in lines:
                     if line["product_id"]:
@@ -1942,6 +2159,7 @@ class StoreHandler(BaseHTTPRequestHandler):
             result = order_dict(conn, updated, True)
         self.send_json({"ok": True, "order": result})
 
+    # ---- التوجيه الرئيسي ----
     def route(self) -> None:  # override dispatch to keep verb-specific mutations explicit
         parsed_path = urlsplit(self.path).path
         if self.command in ("POST", "PUT", "DELETE"):
@@ -1959,6 +2177,10 @@ class StoreHandler(BaseHTTPRequestHandler):
             return
         self.route_read_only()
 
+    # موجّه GET/HEAD: واجهات القراءة العامة (health, store, categories, products) وواجهات المدير (تحتاج جلسة)
+    # وrobots.txt وsitemap.xml، وما سواه يذهب إلى serve_static. ملاحظة: شرط path.startswith("/") في الأسفل صحيح
+    # لأي مسار
+    # يبدأ بـ /، فالفرع كله يُنفَّذ دائمًا والقائمة قبله للتوثيق فقط.
     def route_read_only(self) -> None:
         # Reuse GET routes from route(), while preventing recursive dispatch.
         parsed = urlsplit(self.path)
@@ -1966,6 +2188,7 @@ class StoreHandler(BaseHTTPRequestHandler):
         if path in ("/api/health", "/api/store", "/api/categories", "/api/products", "/api/admin/me", "/api/admin/dashboard", "/api/admin/products", "/api/admin/categories", "/api/admin/orders", "/api/admin/settings", "/api/admin/export/orders.csv", "/robots.txt", "/sitemap.xml") or path.startswith("/"):
             # The GET/HEAD read router below duplicates the GET route table deliberately.
             try:
+                # فحص صحة الخدمة لمنصة الاستضافة: 200 إذا أجابت القاعدة وإلا 503.
                 if path == "/api/health":
                     try:
                         with connect_db() as conn: conn.execute("SELECT 1").fetchone()
@@ -2001,6 +2224,8 @@ class StoreHandler(BaseHTTPRequestHandler):
                     return
                 if path == "/api/admin/dashboard":
                     if not self.require_admin(): return
+                    # ?range=7|30|90 يعيد التقرير الموسّع؛ بدونه يعيد الملخص المبسّط القديم أدناه (يُحتفظ به
+                    # للتوافق مع واجهات أقدم).
                     range_arg = parse_qs(parsed.query, keep_blank_values=True).get("range")
                     if range_arg is not None:
                         if len(range_arg) != 1 or not re.fullmatch(r"\d{1,3}", range_arg[0]) or int(range_arg[0]) not in DASHBOARD_RANGES:
@@ -2025,6 +2250,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                         low_items = [dict(r) for r in conn.execute("SELECT id,name,stock FROM products WHERE active=1 AND stock<=3 ORDER BY stock,id LIMIT 8")]
                         new_messages = conn.execute("SELECT COUNT(*) FROM messages WHERE status='new'").fetchone()[0]
                     self.send_json({"new_messages": new_messages, "products": total_products, "active_products": active_count, "pending_orders": pending, "total_orders": total_orders, "delivered_revenue": delivered_revenue, "low_stock": low_stock, "recent_orders": recent, "daily": daily, "low_stock_items": low_items}); return
+                # أحدث 500 رسالة، مع إمكان التصفية بالحالة، وعدّادات الحالات كلها.
                 if path == "/api/admin/messages":
                     if not self.require_admin(): return
                     wanted = (parse_qs(parsed.query).get("status") or ["all"])[0]
@@ -2051,6 +2277,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                     if not self.require_admin(): return
                     with connect_db() as conn: rows = conn.execute("SELECT c.slug,c.name,c.sort_order,c.active,c.image,c.description,COUNT(p.id) AS product_count FROM categories c LEFT JOIN products p ON p.category=c.slug GROUP BY c.slug ORDER BY c.sort_order,c.name").fetchall()
                     self.send_json({"categories": [{**dict(r), "image": public_image(r["image"])} for r in rows]}); return
+                # تُعرض أحدث 300 طلب فقط؛ ويمكن التصفية بالحالة ?status= (القيم المسموحة من ORDER_STATUSES فقط).
                 if path == "/api/admin/orders":
                     if not self.require_admin(): return
                     qs = dict([part.split("=", 1) if "=" in part else (part, "") for part in parsed.query.split("&") if part])
@@ -2073,6 +2300,8 @@ class StoreHandler(BaseHTTPRequestHandler):
                 if path == "/api/admin/backups":
                     if not self.require_admin(): return
                     self.send_json({"backups": list_backups(), "auto_backup": AUTO_BACKUP, "keep": BACKUP_KEEP}); return
+                # تنزيل نسخة احتياطية كاملة: تُبنى في مجلد مؤقت داخل DATA_DIR ثم تُبَثّ للمتصفح وتُحذف، ويُسجَّل
+                # التنزيل في audit.
                 if path == "/api/admin/backup.zip":
                     session = self.require_admin()
                     if not session: return
@@ -2113,6 +2342,10 @@ class StoreHandler(BaseHTTPRequestHandler):
             return
 
 
+# ---- النسخ الاحتياطي والاستعادة والأوامر ----
+# نسخة قديمة الصيغة (أمر backup والنسخ اليومية): ملف .db متسق (واجهة backup في SQLite آمنة أثناء عمل الخادم) +
+# أرشيف
+# tar.gz للصور، مع الاحتفاظ بأحدث keep من كل نوع.
 def backup_data(keep: int = 14) -> list[Path]:
     """Consistent copy of the database (SQLite online-backup API, safe while the server runs) + a tarball of uploads/.
     Files go to DATA_DIR/backups; only the newest `keep` of each kind are retained."""
@@ -2138,9 +2371,11 @@ def backup_data(keep: int = 14) -> list[Path]:
     return [db_copy, tar_path]
 
 
+# أسماء ملفات النسخ المسموح عرضها في اللوحة (يمنع عرض أو تمرير ملفات أخرى من المجلد).
 BACKUP_NAME_RE = re.compile(r"(?:store-\d{8}-\d{6}\.db|uploads-\d{8}-\d{6}\.tar\.gz|pre-restore-\d{8}-\d{6}\.zip)")
 
 
+# يقتبس اسم جدول/عمود لاستخدامه في SQL (مضاعفة علامة " الداخلية). الأسماء تأتي من sqlite_master لا من المستخدم.
 def quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
@@ -2150,6 +2385,7 @@ def table_counts(conn: sqlite3.Connection) -> dict[str, int]:
     return {name: conn.execute(f"SELECT COUNT(*) FROM {quote_ident(name)}").fetchone()[0] for name in names}
 
 
+# بصمة SHA-256 لملف بقراءته على دفعات 1 ميغابايت (دون تحميله كله في الذاكرة).
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -2196,6 +2432,7 @@ def write_backup_zip(target: Path) -> dict:
                     added += 1
                 except FileNotFoundError:
                     pass  # deleted by the admin while the archive was being written
+            # ملاحظة: النسخة تحوي جدول admins (تجزئة كلمة المرور وسر الخطوتين) لذلك يجب حفظ الأرشيف في مكان خاص.
             manifest = {"app": BACKUP_APP, "format": BACKUP_FORMAT, "version": VERSION, "created_at": now_iso(),
                         "tables": counts, "uploads": added, "store_db_sha256": sha256_file(db_copy),
                         "note": "store.db includes the admins table (password hash, 2FA secret): keep this archive private."}
@@ -2262,6 +2499,10 @@ class RestoreError(Exception):
     """The archive cannot be validated or restored; nothing has been changed."""
 
 
+# الاستعادة آمنة لأن الأرشيف يُفحص كاملًا قبل المساس بأي ملف حي: أسماء الأعضاء مقيدة (منع ../ والروابط الرمزية
+# والمكرر)،
+# حد الحجم الكلي ضد قنابل الضغط، سلامة CRC، بصمة store.db، فحص integrity_check، الجداول المطلوبة، وعدد الصفوف
+# مقابل manifest.
 def validate_backup_zip(archive: Path, work: Path) -> dict:
     """Check a backup archive completely before anything is touched and unpack it into `work` (store.db + uploads/).
     Refuses: not a zip, unexpected / unsafe member names, links, missing or foreign manifest, CRC errors, a store.db whose
@@ -2347,6 +2588,9 @@ def server_is_running() -> bool:
         return False
 
 
+# تحفظ الحالة الحالية أولًا في pre-restore-*.zip ثم تستبدل store.db بـ os.replace (ذري) وتزيل ملفات -wal/-shm
+# القديمة
+# حتى لا تُطبَّق على القاعدة الجديدة، وتنسخ الصور وتحذف التي ليست في الأرشيف.
 def restore_backup(archive: Path, force: bool = False) -> dict:
     """python3 app.py restore <backup.zip> (server stopped): validate the archive completely, save the current state to
     DATA_DIR/backups/pre-restore-<UTC time>.zip, then replace store.db and the contents of uploads/."""
@@ -2431,6 +2675,8 @@ def sweep_orphan_uploads(min_age: int = 24 * 3600) -> int:
     return removed
 
 
+# خيط خلفي (daemon) يعمل كل 24 ساعة: نسخة احتياطية، تنظيف الصور اليتيمة، وتقليم الإحصاءات القديمة. الأخطاء تُطبع
+# ولا توقفه.
 def start_auto_backup(keep: int) -> None:
     def loop() -> None:
         while True:
@@ -2475,6 +2721,8 @@ def run_set_admin() -> int:
     return 0
 
 
+# ---- نقطة التشغيل ----
+# الأوامر الفرعية (export-sql, restore, backup, set-admin) تنفَّذ وتنتهي. بدونها يبدأ الخادم الفعلي أدناه.
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] in ("export-sql", "restore"):
         sys.exit(run_cli(sys.argv[1:]))
@@ -2498,6 +2746,7 @@ if __name__ == "__main__":
         sweep_orphan_uploads()
     except Exception:
         traceback.print_exc()
+    # ThreadingHTTPServer: خيط لكل طلب. daemon_threads حتى لا تمنع الخيوط العالقة إيقاف العملية.
     server = ThreadingHTTPServer((HOST, PORT), StoreHandler)
     server.daemon_threads = True
     if AUTO_BACKUP:

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف colors.xml: ألوان التطبيق. الأسماء تُستعمل في التخطيط والثيمات. -->
 <resources>
     <!-- Same "night & champagne" palette as the website. -->
     <color name="app_background">#FDFAF4</color>

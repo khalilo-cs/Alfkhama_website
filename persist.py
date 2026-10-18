@@ -19,6 +19,7 @@ Signature V4 is implemented by hand. Disabled (a no-op) unless every BACKUP_S3_*
   BACKUP_INTERVAL      ثوانٍ بين اللقطات عند وجود تغيير مهم (الافتراضي 120)
   BACKUP_ANALYTICS_INTERVAL  أدنى فاصل للقطات تغيّرت فيها الزيارات فقط (الافتراضي 600)
 """
+# ---- الاستيرادات: مكتبة بايثون القياسية فقط (لا حزم خارجية) ----
 from __future__ import annotations
 
 import gzip
@@ -42,12 +43,14 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
+# ---- الثوابت والحدود ----
 KEEP_SNAPSHOTS = 5                       # عدد اللقطات القديمة المحفوظة (الأحدث)
 LATEST_KEY = "latest.json"
 DB_PREFIX = "db/"
 UPLOADS_PREFIX = "uploads/"
 # اسم لقطة القاعدة: وقت UTC ثم أول 16 خانة من SHA-256 للملف المضغوط. أي مفتاح بغير هذا الشكل يُتجاهل.
 DB_KEY_RE = re.compile(r"db/(\d{8}T\d{6}Z)-([0-9a-f]{16})\.db\.gz")
+# يقرأ حدًا بالميجابايت من متغير بيئة ويحوّله إلى بايت؛ القيمة الفارغة أو غير الرقمية ترجع للافتراضي.
 def _mb_env(name: str, default_mb: int) -> int:
     try:
         return max(1, int(os.environ.get(name, "").strip() or default_mb)) * 1024 ** 2
@@ -69,10 +72,12 @@ KEEP_DAILY_FOR = 14 * 24 * 3600
 REQUIRED_TABLES = {"settings", "admins", "categories", "products", "orders", "order_items"}
 
 
+# الوقت الحالي بتوقيت UTC (دالة مستقلة ليسهل استبدالها في الاختبارات).
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# تسجيل افتراضي على stdout (يظهر في سجلات Render)؛ flush حتى لا تتأخر الرسائل.
 def default_log(message: str) -> None:
     print(f"[persist] {message}", flush=True)
 
@@ -80,6 +85,7 @@ def default_log(message: str) -> None:
 # ------------------------------------------------------------------------------------------------------------------
 # AWS Signature Version 4 (يدويًا بالمكتبة القياسية)
 # ------------------------------------------------------------------------------------------------------------------
+# HMAC-SHA256 مساعد لسلسلة اشتقاق مفتاح التوقيع.
 def _hmac(key: bytes, message: str) -> bytes:
     return hmac.new(key, message.encode("utf-8"), hashlib.sha256).digest()
 
@@ -89,11 +95,13 @@ def uri_encode(value: str, keep_slash: bool = False) -> str:
     return urllib.parse.quote(value, safe="/-_.~" if keep_slash else "-_.~")
 
 
+# السلسلة القانونية للاستعلام: الأزواج مرمّزة ومرتبة أبجديًا، وهذا شرط ليتطابق التوقيع مع ما يحسبه الخادم.
 def canonical_query(params: dict[str, str] | None) -> str:
     pairs = sorted((uri_encode(str(k)), uri_encode(str(v))) for k, v in (params or {}).items())
     return "&".join(f"{k}={v}" for k, v in pairs)
 
 
+# اشتقاق مفتاح التوقيع من السر: HMAC متسلسل على (التاريخ، المنطقة، الخدمة، aws4_request).
 def signing_key(secret_key: str, datestamp: str, region: str, service: str = "s3") -> bytes:
     key = _hmac(("AWS4" + secret_key).encode("utf-8"), datestamp)
     for part in (region, service, "aws4_request"):
@@ -101,6 +109,7 @@ def signing_key(secret_key: str, datestamp: str, region: str, service: str = "s3
     return key
 
 
+# بناء توقيع SigV4: الطلب القانوني -> سلسلة للتوقيع -> HMAC. أي اختلاف بسيط في الترتيب يجعل المخزن يرفض الطلب.
 def sign_request(method: str, host: str, path: str, query: dict[str, str] | None, headers: dict[str, str] | None,
                  payload_hash: str, access_key: str, secret_key: str, region: str, when: datetime,
                  service: str = "s3") -> dict[str, str]:
@@ -126,6 +135,7 @@ def sign_request(method: str, host: str, path: str, query: dict[str, str] | None
 # ------------------------------------------------------------------------------------------------------------------
 # الإعداد من البيئة
 # ------------------------------------------------------------------------------------------------------------------
+# إعدادات التخزين الخارجي (نقطة النهاية والحاوية والمفاتيح والفواصل الزمنية). الأسرار لا تُطبع (انظر __repr__).
 class Config:
     def __init__(self, endpoint: str, bucket: str, access_key: str, secret_key: str, region: str = "auto",
                  prefix: str = "alfakhama/", interval: int = 120, analytics_interval: int = 600):
@@ -144,6 +154,7 @@ class Config:
         return f"Config(endpoint={self.endpoint!r}, bucket={self.bucket!r}, prefix={self.prefix!r})"
 
 
+# يقرأ عددًا صحيحًا موجبًا من متغيرات البيئة مع قيمة افتراضية عند الخطأ.
 def _int_env(env, name: str, default: int) -> int:
     try:
         return max(1, int(str(env.get(name, "")).strip() or default))
@@ -151,6 +162,7 @@ def _int_env(env, name: str, default: int) -> int:
         return default
 
 
+# يتحقق من متغيرات BACKUP_S3_* بصرامة (https إلا للمضيف المحلي، اسم حاوية صالح)؛ أي خلل يعطّل الميزة فقط.
 def load_config(env=None, log=default_log) -> Config | None:
     """يعيد Config إن كانت كل المتغيرات الأربعة الأساسية مضبوطة وصحيحة، وإلا None (التخزين الخارجي معطّل)."""
     env = os.environ if env is None else env
@@ -188,6 +200,7 @@ def load_config(env=None, log=default_log) -> Config | None:
 # ------------------------------------------------------------------------------------------------------------------
 # عميل S3 بسيط
 # ------------------------------------------------------------------------------------------------------------------
+# أصناف الأخطاء: NotFound (404) و DeadlineExceeded (انتهت الميزانية الزمنية) تُعامل خارج إعادة المحاولة.
 class S3Error(Exception):
     def __init__(self, message: str, status: int = 0, code: str = ""):
         super().__init__(message)
@@ -203,12 +216,14 @@ class DeadlineExceeded(S3Error):
     pass
 
 
+# معالج يمنع التحويلات: لو حوّلنا المخزن إلى عنوان آخر فلن نرسل إليه ترويسات التوقيع.
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """لا نتبع التحويلات أبدًا: لا نريد إرسال التوقيع إلى عنوان آخر."""
     def redirect_request(self, *args, **kwargs):
         return None
 
 
+# عميل HTTP صغير فوق urllib يوقّع الطلبات بـ SigV4 ويعيد المحاولة للأعطال المؤقتة (نمط path-style: /الحاوية/المفتاح).
 class S3Client:
     def __init__(self, cfg: Config, timeout: float = 30.0, attempts: int = 4, backoff: float = 0.5, sleep=time.sleep):
         self.cfg = cfg
@@ -231,11 +246,14 @@ class S3Client:
             handlers.append(urllib.request.ProxyHandler({}))  # الاتصال المحلي لا يمر عبر وكيل
         self.opener = urllib.request.build_opener(*handlers)
 
+    # المسار الكامل للمفتاح داخل الحاوية (غير مُرمَّز؛ الترميز يتم عند بناء الرابط).
     def _path(self, key: str) -> str:
         return f"{self.base_path}/{self.cfg.bucket}" + (f"/{key}" if key else "")
 
+    # محاولة واحدة: تحسب تجزئة المحتوى وتوقّع وترسل. أخطاء HTTP تتحول إلى NotFound أو S3Error مع كود الخطأ من XML.
     def _once(self, method: str, key: str, query, body, headers, deadline, reader):
         remaining = None if deadline is None else deadline - time.monotonic()
+        # لا نبدأ طلبًا جديدًا إذا بقي أقل من 0.2 ثانية من الميزانية (مهم عند إيقاف الخدمة).
         if remaining is not None and remaining <= 0.2:
             raise DeadlineExceeded("انتهت المهلة المخصصة / time budget exhausted")
         path = self._path(key)
@@ -253,11 +271,13 @@ class S3Client:
                               self.cfg.secret_key, self.cfg.region, utc_now())
         qs = canonical_query(query)
         url = f"{self.scheme}://{self.host}{uri_encode(path, keep_slash=True)}" + (f"?{qs}" if qs else "")
+        # urllib يطبّع أسماء الترويسات؛ نكتب Authorization بحرف كبير ونرسل بقية الترويسات الموقّعة كما هي.
         wire = {("Authorization" if k == "authorization" else k): v for k, v in signed.items()}
         upload = open(body, "rb") if is_file else None
         if is_file:
             wire["Content-Length"] = str(body.stat().st_size)
         req = urllib.request.Request(url, data=upload if is_file else (body if body else None), method=method, headers=wire)
+        # مهلة الاتصال لا تتجاوز ما تبقى من الميزانية الكلية.
         timeout = self.timeout if remaining is None else max(0.5, min(self.timeout, remaining))
         try:
             with self.opener.open(req, timeout=timeout) as resp:
@@ -305,6 +325,7 @@ class S3Client:
     def get(self, key: str, deadline=None) -> bytes:
         return self.request("GET", key, deadline=deadline)[1]
 
+    # التنزيل إلى ملف بتدفق مع سقف للحجم، بدل قراءة كل الكائن في الذاكرة.
     def get_file(self, key: str, dest: Path, max_bytes: int, deadline=None) -> tuple[int, str]:
         """ينزّل إلى ملف بتدفق ويعيد (الحجم, sha256). يتجاوز max_bytes => خطأ."""
         def reader(resp):
@@ -327,6 +348,7 @@ class S3Client:
             return size, digest.hexdigest()
         return self.request("GET", key, deadline=deadline, reader=reader)[1]
 
+    # يتحقق من وجود كائن دون تنزيله؛ يعيد None إذا لم يوجد.
     def head(self, key: str, deadline=None) -> dict | None:
         try:
             status, _ = self.request("HEAD", key, deadline=deadline, reader=lambda r: dict(r.headers))
@@ -334,6 +356,7 @@ class S3Client:
             return None
         return {"status": status}
 
+    # حذف كائن؛ عدم وجوده ليس خطأ.
     def delete(self, key: str, deadline=None) -> None:
         try:
             self.request("DELETE", key, deadline=deadline)
@@ -344,14 +367,17 @@ class S3Client:
         """ListObjectsV2 كاملة (مع الصفحات): قائمة (المفتاح الكامل, الحجم). مفاتيح بأحرف تحكم تُهمل."""
         out: list[tuple[str, int]] = []
         token = ""
+        # حد أقصى للصفحات (1000 صفحة) حتى لا تدور الحلقة للأبد إن أعاد المخزن token متكررًا.
         for _ in range(1000):
             query = {"list-type": "2", "prefix": self.cfg.prefix + prefix}
             if token:
                 query["continuation-token"] = token
             _, data = self.request("GET", "", query=query, deadline=deadline)
+            # حماية من هجمات XML (توسيع الكيانات): رد S3 الحقيقي لا يحتوي DOCTYPE ولا ENTITY، فنرفض ما يحتويها.
             if b"<!DOCTYPE" in data[:2048].upper() or b"<!ENTITY" in data.upper():
                 raise S3Error("رد غير متوقع من المخزن / unexpected XML from the store")
             root = ET.fromstring(data)
+            # ردود S3 تأتي غالبًا بمجال أسماء XML؛ نستخرجه لنستخدمه في البحث عن العناصر.
             ns = root.tag.partition("}")[0] + "}" if root.tag.startswith("{") else ""
             for item in root.findall(f"{ns}Contents"):
                 key = item.findtext(f"{ns}Key") or ""
@@ -372,6 +398,7 @@ class S3Client:
 # ------------------------------------------------------------------------------------------------------------------
 # فحوص القاعدة
 # ------------------------------------------------------------------------------------------------------------------
+# أسماء الجداول في ملف قاعدة مفتوح للقراءة فقط (mode=ro) فلا نغيّر شيئًا فيه.
 def db_tables(path: Path) -> set[str]:
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
     try:
@@ -380,6 +407,7 @@ def db_tables(path: Path) -> set[str]:
         conn.close()
 
 
+# فحص سلامة ملف قاعدة منزَّل قبل اعتماده (لا نثبّت لقطة تالفة أو ناقصة الجداول).
 def check_db_file(path: Path, required: set[str]) -> int:
     """integrity_check + وجود الجداول المطلوبة. يعيد user_version أو يرفع ValueError."""
     try:
@@ -400,6 +428,7 @@ def check_db_file(path: Path, required: set[str]) -> int:
         conn.close()
 
 
+# أهم حماية في الاستعادة: لا نستبدل قاعدة محلية إلا إذا كانت بذرة جديدة بلا أي بيانات حقيقية.
 def is_pristine_seed(path: Path, default_settings: dict | None = None) -> bool:
     """هل القاعدة المحلية بذرة جديدة لم يلمسها المدير؟ (لا طلبات، لا رسائل، لا سجل إدارة، منتجات البذرة كما هي)
     أي شك => False، لأن الاستعادة لا يجوز أن تمحو بيانات حقيقية أبدًا."""
@@ -440,6 +469,7 @@ def is_pristine_seed(path: Path, default_settings: dict | None = None) -> bool:
         conn.close()
 
 
+# سياسة التقليم: ما لم يُذكر هنا يُحذف من المخزن لاحقًا في _prune.
 def select_keep(keys: list[str], now: datetime) -> set[str]:
     """أي لقطات نحتفظ بها: الأحدث 5، ثم الأحدث في كل ساعة (آخر 24 ساعة)، ثم الأحدث في كل يوم (آخر 14 يومًا)."""
     ordered = sorted(keys, reverse=True)
@@ -467,6 +497,7 @@ def select_keep(keys: list[str], now: datetime) -> set[str]:
 # ------------------------------------------------------------------------------------------------------------------
 # المدير الرئيسي
 # ------------------------------------------------------------------------------------------------------------------
+# المدير الرئيسي: يربط الاستعادة عند الإقلاع واللقطات الدورية والخيط الخلفي والإيقاف الآمن.
 class Persistence:
     def __init__(self, cfg: Config | None, data_dir: Path, db_path: Path, upload_dir: Path, name_re,
                  log=default_log, required_tables: set[str] | None = None, default_settings: dict | None = None,
@@ -492,6 +523,7 @@ class Persistence:
         self.last_error = ""
         self.failed_uploads = 0
         self.restore_status = "disabled" if not cfg else "not_run"
+        # حالة المدير: علامات التغيير (مهم/زيارات)، آخر محاولة، آخر لقطة وخطأ، وقفل يمنع لقطتين متزامنتين.
         self.blocked = False                 # true => لا نرفع لقطات حتى نتأكد مما في المخزن (حماية من محو النسخة الحقيقية)
         self._blocked_check = 0.0
         self._own_keys: set[str] = set()     # لقطات هذا النسخة (استعدناها أو رفعناها) لكشف كاتب آخر على latest.json
@@ -504,6 +536,7 @@ class Persistence:
     def log(self, message: str) -> None:
         self._log(self._safe(message))
 
+    # كل رسالة سجل تمر من هنا حتى لا يظهر مفتاح الوصول أو السر مصادفة في السجلات.
     def _safe(self, text: str) -> str:
         """يحجب أي سر قد يتسرب إلى رسالة خطأ."""
         if self.cfg:
@@ -512,9 +545,11 @@ class Persistence:
                     text = text.replace(secret, "***")
         return text
 
+    # يضيف بادئة المستخدم (BACKUP_S3_PREFIX) إلى المفتاح النسبي.
     def _k(self, key: str) -> str:
         return self.cfg.prefix + key
 
+    # أقرب موعد نهائي بين موعد العملية والموعد الصارم للإيقاف.
     def _deadline(self, local: float | None = None) -> float | None:
         values = [d for d in (local, self._hard_deadline) if d is not None]
         return min(values) if values else None
@@ -528,6 +563,7 @@ class Persistence:
         else:
             self._dirty_important = True
 
+    # حالة مختصرة (مفعّل؟ آخر لقطة، موقوف؟ نتيجة الاستعادة) بلا أي أسرار.
     def status(self) -> dict:
         return {"enabled": self.enabled, "last_snapshot": self.last_snapshot, "blocked": self.blocked,
                 "restore": self.restore_status}
@@ -550,9 +586,11 @@ class Persistence:
             self.log("الرفع موقوف حتى يتوفر المخزن / uploads paused until the bucket is reachable")
         return status
 
+    # منطق الاستعادة: نحافظ على أي قاعدة محلية فيها بيانات، وإلا نجرّب اللقطات من الأحدث إلى الأقدم.
     def _restore(self) -> str:
         for stale in self.data_dir.glob(".persist-*"):
             shutil.rmtree(stale, ignore_errors=True) if stale.is_dir() else stale.unlink(missing_ok=True)
+        # ملف علامة يبقى إن فشل تنزيل بعض الصور ليُعاد المحاولة في الإقلاع التالي.
         marker = self.data_dir / ".uploads-incomplete"  # علامة: بقيت صور لم تُنزَّل، نعيد المحاولة في الإقلاع التالي
         db_exists = self.db_path.exists()
         if db_exists and not is_pristine_seed(self.db_path, self.default_settings):
@@ -582,6 +620,7 @@ class Persistence:
                 self.log(f"تعذر تنزيل اللقطة / snapshot download failed: {key}: {type(exc).__name__}: {exc}")
         return "unreachable" if transport_errors else "corrupt_all"
 
+    # يجمع المرشحين: manifest (latest.json) أولًا لأنه الأحدث، ثم القائمة كاحتياط إن كان تالفًا أو مفقودًا.
     def _candidates(self) -> list[tuple[str, dict | None]]:
         """الأحدث أولًا: ما يشير إليه latest.json ثم بقية اللقطات من القائمة. المفاتيح العدائية تُهمل."""
         out: list[tuple[str, dict | None]] = []
@@ -605,6 +644,7 @@ class Persistence:
             out.append((rel, None))
         return out
 
+    # ينزّل لقطة واحدة إلى مجلد مؤقت ويتحقق منها (الحجم، SHA-256، فك الضغط بسقف، سلامة القاعدة) ثم يثبّتها ذريًا.
     def _download_and_install(self, rel_key: str, meta: dict | None) -> bool:
         match = DB_KEY_RE.fullmatch(rel_key)
         if not match:
@@ -616,12 +656,14 @@ class Persistence:
             if meta is not None:
                 if size != meta.get("size") or sha != meta.get("sha256"):
                     raise ValueError("size/sha256 mismatch with latest.json")
+            # اسم الكائن يحمل أول 16 خانة من SHA-256، فأي عدم تطابق يعني كائنًا مبدّلًا أو تالفًا.
             if not sha.startswith(match.group(2)):
                 raise ValueError("sha256 does not match the object name")
             if shutil.disk_usage(self.data_dir).free < size + MIN_FREE_DISK:
                 raise OSError("not enough free disk space for restore")  # ليس تلفًا في اللقطة => unreachable
             try:
                 total = 0
+                # فك الضغط على قطع مع سقف للحجم الناتج (حماية من ملف gzip صغير ينتفخ إلى حجم هائل).
                 with gzip.open(gz_path, "rb") as src, open(raw_path, "wb") as dst:
                     while True:
                         chunk = src.read(1024 * 1024)
@@ -644,6 +686,7 @@ class Persistence:
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
+    # يستعيد الصور المفقودة محليًا فقط (لا يستبدل ملفًا موجودًا).
     def _restore_uploads(self, marker: Path) -> None:
         """ينزّل الصور الناقصة. أسماء المفاتيح قادمة من المخزن فهي غير موثوقة: تُفحص بنفس regex الخادم."""
         self.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -683,6 +726,7 @@ class Persistence:
         self.log(f"الصور في المخزن: {len(remote_map)}، فشل: {failed} / uploads in bucket: {len(remote_map)}, failed: {failed}")
 
     # -- اللقطات ------------------------------------------------------------------------------------------------
+    # صور الرفع المحلية الصالحة فقط: اسم مطابق لنمط الخادم وملف عادي (لا روابط رمزية).
     def _local_uploads(self) -> list[Path]:
         if not self.upload_dir.is_dir():
             return []
@@ -695,6 +739,7 @@ class Persistence:
                 pass
         return sorted(out)
 
+    # نرفع الصور الجديدة فقط: يكفي مقارنة الاسم والحجم مع ما في المخزن.
     def _sync_uploads(self, deadline: float | None) -> int:
         """يرفع الصور الجديدة فقط (القائمة تُجلب مرة واحدة ثم تُحدَّث محليًا)."""
         if self._remote_uploads is None:
@@ -730,6 +775,7 @@ class Persistence:
             sent += 1
         return sent
 
+    # حماية من كاتبين متزامنين (النسخة القديمة والجديدة أثناء النشر): لا نمحو لقطة غريبة دون أن نحتفظ بنسخة منها.
     def _guard_conflict(self, deadline) -> None:
         """إن كانت latest.json تشير إلى لقطة ليست من عملنا (نسخة قديمة من الخدمة ما زالت تعمل أثناء النشر)
         نحفظ نسخة منها تحت conflicts/ قبل أن نكتب فوقها، فلا تضيع طلباتها ويمكن دمجها يدويًا."""
@@ -751,6 +797,7 @@ class Persistence:
         finally:
             tmp.unlink(missing_ok=True)
 
+    # يكتب manifest يشير لآخر لقطة؛ يُكتب بعد رفع اللقطة نفسها حتى لا يشير أبدًا إلى كائن غير موجود.
     def _write_latest(self, db_key: str, sha: str, size: int, raw_size: int, user_version: int, deadline) -> None:
         if db_key not in self._own_keys:
             self._guard_conflict(deadline)
@@ -761,6 +808,7 @@ class Persistence:
                         "application/json", deadline=self._deadline(deadline))
         self._own_keys.add(db_key)
 
+    # حذف اللقطات القديمة وفق select_keep؛ لا يحذف شيئًا لو كانت كل لقطات المخزن تالفة.
     def _prune(self, keep_key: str, deadline) -> None:
         keys = []
         for full, _ in self.client.list(DB_PREFIX, deadline=self._deadline(deadline)):
@@ -774,12 +822,14 @@ class Persistence:
             if rel not in newest:
                 self.client.delete(self._k(rel), deadline=self._deadline(deadline))
 
+    # تنفيذ لقطة: نسخة متسقة من القاعدة بواجهة النسخ في SQLite، ثم ضغط، ثم رفع، ثم manifest، ثم الصور، ثم التقليم.
     def snapshot(self, budget: float | None = None, reason: str = "auto") -> bool:
         """لقطة كاملة: (صور) ثم القاعدة ثم latest.json ثم الصور ثم التقليم. تعيد True عند النجاح.
         مع budget (إيقاف الخدمة) تُرفع القاعدة أولًا لأنها الأهم."""
         if not self.cfg or self.blocked:
             return False
         local_deadline = None if budget is None else time.monotonic() + budget
+        # بلا ميزانية ننتظر القفل مهما طال؛ مع ميزانية (إيقاف الخدمة) ننتظر بقدرها فقط.
         if not self._lock.acquire(timeout=-1 if budget is None else max(0.1, budget)):
             return False
         imp, ana = self._dirty_important, self._dirty_analytics
@@ -802,6 +852,7 @@ class Persistence:
                 source.close()
             raw_size = copy.stat().st_size
             with open(copy, "rb") as src, open(gz_path, "wb") as raw_out:
+                # mtime=0 يجعل الضغط حتميًا (نفس المحتوى => نفس SHA-256).
                 with gzip.GzipFile(fileobj=raw_out, mode="wb", compresslevel=6, mtime=0) as gz:
                     shutil.copyfileobj(src, gz, 1024 * 1024)
             digest = hashlib.sha256()
@@ -811,6 +862,7 @@ class Persistence:
             sha = digest.hexdigest()
             gz_size = gz_path.stat().st_size
             stamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
+            # اسم الكائن غير قابل للتعديل: الوقت + بداية التجزئة، فلا تُكتب فوق لقطة قديمة.
             db_key = f"{DB_PREFIX}{stamp}-{sha[:16]}.db.gz"
             self.client.put(self._k(db_key), gz_path, "application/gzip", deadline=self._deadline(local_deadline))
             self._write_latest(db_key, sha, gz_size, raw_size, user_version, local_deadline)
@@ -841,6 +893,7 @@ class Persistence:
             self._lock.release()
 
     # -- الخيط الخلفي والإيقاف -----------------------------------------------------------------------------------
+    # يُستدعى كل دقيقة أثناء الإيقاف الوقائي للتحقق مما إذا عاد المخزن للعمل.
     def _recheck_remote(self) -> None:
         """بعد فشل الاستعادة: إن تبيّن أن المخزن فارغ فعلًا نرفع الإيقاف. وإن فيه لقطة نبقى موقوفين (يلزم إعادة تشغيل)."""
         try:
@@ -853,6 +906,7 @@ class Persistence:
         elif self.blocked:
             self.log("المخزن فيه نسخة لم تُستعد؛ أعد تشغيل الخدمة لاستعادتها / bucket has a snapshot, restart to restore it")
 
+    # الخيط الخلفي: كل ثانية يفحص علامات التغيير ويأخذ لقطة إذا انقضى الفاصل (زيارات فقط => فاصل أطول).
     def _loop(self) -> None:
         while not self._stop.wait(1.0):
             try:
@@ -869,6 +923,7 @@ class Persistence:
             except Exception as exc:
                 self.log(f"خطأ في خيط الحفظ / persist thread error: {type(exc).__name__}: {self._safe(str(exc))}")
 
+    # يشغّل الخيط الخلفي مرة واحدة (daemon فلا يمنع إنهاء العملية).
     def start(self) -> None:
         if not self.cfg or self._thread:
             return
@@ -877,6 +932,7 @@ class Persistence:
         self._thread = threading.Thread(target=self._loop, daemon=True, name="persist")
         self._thread.start()
 
+    # يُستدعى عند إيقاف الخدمة لحفظ آخر التغييرات ضمن مهلة صارمة.
     def flush(self, budget: float = 20.0) -> bool:
         """لقطة أخيرة عند SIGTERM/SIGINT بميزانية زمنية صارمة (Render يقتل الحاوية بعد نحو 30 ثانية)."""
         if not self.cfg or self.blocked:

@@ -1,3 +1,5 @@
+# ملف اختبار: واجهة لوحة المعلومات GET /api/admin/dashboard?range=N (مؤشرات، طلبات يومية، أفضل المنتجات...)
+# وتقديم الملفات الثابتة من /assets/vendor/** بالترويسات الصحيحة وبدون ثغرة تجاوز المسارات.
 """GET /api/admin/dashboard?range=N and static serving of /assets/vendor/**."""
 from __future__ import annotations
 
@@ -10,29 +12,38 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_app import ROOT, ServerCase  # noqa: E402
 
+# ---- ثوابت ----
+# توقيت الرياض UTC+3 (بدون توقيت صيفي): اللوحة تحسب "اليوم" بحسبه.
 RIYADH = timezone(timedelta(hours=3))
+# حالات الطلب الستة التي يجب أن تظهر دائماً في orders_by_status حتى لو كان عددها صفراً.
 STATUSES = {"new", "confirmed", "preparing", "shipped", "delivered", "cancelled"}
 
 
+# ---- اختبارات واجهة اللوحة ----
 class DashboardApiTest(ServerCase):
+    # قبل كل اختبار: تسجيل دخول المدير وحفظ الكوكي ورمز CSRF لاستخدامهما في كل الطلبات المحمية.
     def setUp(self):
         self.cookie, self.csrf = self.login()
         self.kw = {"cookie": self.cookie, "csrf": self.csrf}
 
+    # ينشئ منتجاً عبر واجهة المدير ويعيد بياناته؛ السعر 0 يعني "السعر عند الطلب".
     def product(self, name, price, stock=10):
         status, data, _ = self.json("POST", "/api/admin/products", {"name": name, "category": "curtains", "price": price, "stock": stock,
                                                                     "image": "/assets/wavy-03.jpg"}, **self.kw)
         self.assertEqual(status, 201, data)
         return data["product"]
 
+    # ينشئ طلباً عاماً (كزائر بلا تسجيل دخول) ويعيد رقمه.
     def order(self, items):
         status, data, _ = self.json("POST", "/api/orders", {"name": "عميل", "phone": "0551234567", "city": "جدة", "consent": True, "items": items})
         self.assertEqual(status, 201, data)
         return data["order_id"]
 
+    # يطلب بيانات اللوحة كمدير؛ query هو نص الاستعلام كاملاً (قد يكون فارغاً).
     def dash(self, query="?range=7"):
         return self.json("GET", "/api/admin/dashboard" + query, **self.kw)
 
+    # يتحقق من أن اللوحة تتطلب تسجيل دخول (401) وأن range لا يقبل إلا 7 أو 30 أو 90 (غير ذلك 400).
     def test_auth_and_range_validation(self):
         self.assertEqual(self.json("GET", "/api/admin/dashboard?range=7")[0], 401)
         for bad in ("?range=5", "?range=abc", "?range=", "?range=7&range=30", "?range=-7", "?range=0007x"):
@@ -44,6 +55,8 @@ class DashboardApiTest(ServerCase):
         self.assertIn("recent_orders", legacy)
         self.assertNotIn("kpis", legacy)
 
+    # الاختبار الرئيسي: نأخذ قراءة أساسية، ثم ننشئ 3 طلبات ونغيّر حالتها ونضيف رسالة تواصل،
+    # ونقارن الفروق (لأن قاعدة البيانات قد تحتوي بيانات سابقة) مع شكل الاستجابة وملء الأيام الفارغة بأصفار.
     def test_shape_zero_fill_status_counts_and_known_revenue(self):
         priced = self.product("ستارة مسعّرة اختبار", 400)
         on_request = self.product("ستارة عند الطلب اختبار", 0)
@@ -90,6 +103,7 @@ class DashboardApiTest(ServerCase):
             for key in ("visits_prev_period", "products_total", "products_active", "low_stock_count", "visits_period"):
                 self.assertIn(key, d["kpis"])
 
+    # منتج مخزونه 2 يجب أن يظهر في قائمة المخزون المنخفض (الحد 3 أو أقل) ويُحتسب في low_stock_count.
     def test_revenue_null_when_nothing_known_and_low_stock(self):
         item = self.product("منتج مخزون منخفض اختبار", 0, stock=2)
         self.order([{"product_id": item["id"], "quantity": 1}])
@@ -97,6 +111,7 @@ class DashboardApiTest(ServerCase):
         self.assertTrue(any(x["id"] == item["id"] and x["stock"] <= 3 for x in d["low_stock"]))
         self.assertGreaterEqual(d["kpis"]["low_stock_count"], 1)
 
+    # أمان: ردّ اللوحة يجب ألا يحوي أي كلمة حساسة (كلمة المرور، الهاش، TOTP، CSRF، الرموز) ولا نمط هاش كلمة المرور.
     def test_no_secrets_in_payload(self):
         status, resp, data = self.req("GET", "/api/admin/dashboard?range=90", cookie=self.cookie, csrf=self.csrf)
         self.assertEqual(status, 200)
@@ -105,6 +120,8 @@ class DashboardApiTest(ServerCase):
             self.assertNotIn(needle, raw, needle)
         self.assertNotRegex(raw, r"[0-9a-f]{32}\$[0-9a-f]{64}")
 
+    # نعدّل تاريخ طلب في قاعدة SQLite مباشرة ليصبح عمره 10 أيام، فيجب أن ينتقل من الفترة الحالية (7 أيام)
+    # إلى الفترة السابقة دون أن يتغير إجمالي الطلبات.
     def test_old_order_moves_to_previous_period(self):
         item = self.product("منتج حدود اختبار", 50)
         oid = self.order([{"product_id": item["id"], "quantity": 1}])
@@ -121,8 +138,10 @@ class DashboardApiTest(ServerCase):
         self.assertEqual(after["kpis"]["orders_total"], before["kpis"]["orders_total"])
 
 
+# ---- الملفات الثابتة لمجلد vendor (مكتبات خارجية محلية) ----
 class VendorStaticTest(ServerCase):
     @classmethod
+    # ننشئ مجلد مكتبة وهمي مؤقتاً داخل assets/vendor ليختبر الخادم تقديمه، ونحذفه في tearDownClass.
     def setUpClass(cls):
         super().setUpClass()
         cls.vendor = ROOT / "assets" / "vendor" / "_testlib"
@@ -140,6 +159,7 @@ class VendorStaticTest(ServerCase):
             pass
         super().tearDownClass()
 
+    # ملفات vendor تُقدَّم بنوع MIME صحيح مع nosniff وكاش لمدة سنة (max-age=31536000) لأن ملفات المكتبات لا تتغير.
     def test_vendor_files_headers(self):
         status, resp, body = self.req("GET", "/assets/vendor/_testlib/lib.min.js")
         self.assertEqual(status, 200)
@@ -151,6 +171,7 @@ class VendorStaticTest(ServerCase):
         self.assertEqual(status, 200)
         self.assertTrue(resp.getheader("Content-Type").startswith("text/css"))
 
+    # أمان: محاولات الخروج من المجلد بـ .. (عادية أو مشفّرة أو بشرطة عكسية) يجب أن تُرفض ولا تكشف كود الخادم.
     def test_no_traversal(self):
         for path in ("/assets/vendor/../../app.py", "/assets/vendor/%2e%2e/%2e%2e/app.py", "/assets/vendor/..%2f..%2fapp.py",
                      "/assets/vendor/_testlib/../../../store.db", "/assets/vendor/..\\..\\app.py"):

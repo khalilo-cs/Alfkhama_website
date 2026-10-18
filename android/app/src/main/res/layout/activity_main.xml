@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف activity_main.xml: تخطيط الشاشة الوحيدة. من الأسفل للأعلى: WebView يعرض الموقع، وشريط -->
+<!-- تقدم، وشاشة خطأ، -->
+<!-- ثم شاشة البدء فوق الكل. الاتجاه rtl للعربية. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/root"
@@ -7,11 +10,13 @@
     android:background="@color/night"
     android:layoutDirection="rtl">
 
+    <!-- شريط نسخة الاختبار ثم منطقة المحتوى (تأخذ ما تبقى من الارتفاع). -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
+        <!-- شريط يظهر في نسخة الاختبار فقط ويعرض عنوان الخادم الحالي (يُظهره الكود). -->
         <TextView
             android:id="@+id/test_banner"
             android:layout_width="match_parent"
@@ -31,11 +36,13 @@
             android:layout_height="0dp"
             android:layout_weight="1">
 
+            <!-- الصفحة الفعلية للمتجر: كل المحتوى يأتي من الخادم. -->
             <WebView
                 android:id="@+id/web_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
+            <!-- شريط تقدم رفيع فوق الصفحة، يتحكم فيه ShellChrome. -->
             <ProgressBar
                 android:id="@+id/progress"
                 style="?android:attr/progressBarStyleHorizontal"
@@ -45,6 +52,8 @@
                 android:progressTint="@color/gold"
                 android:visibility="gone" />
 
+            <!-- شاشة الخطأ: مخفية افتراضيًا، وتغطي WebView عند تعذّر الاتصال أو شهادة غير صالحة -->
+            <!-- (انظر showError). -->
             <LinearLayout
                 android:id="@+id/error_view"
                 android:layout_width="match_parent"
@@ -85,6 +94,7 @@
                     android:text="@string/retry"
                     android:textColor="@color/gold_light" />
 
+                <!-- زر تغيير العنوان: يظهر في نسخة الاختبار فقط (يُضبط من الكود). -->
                 <Button
                     android:id="@+id/change_server_button"
                     style="?android:attr/borderlessButtonStyle"

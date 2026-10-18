@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف themes.xml لـ Android 12 فما فوق (values-v31): يضيف إعدادات شاشة البدء الرسمية بنفس -->
+<!-- الخلفية الداكنة والشعار. -->
 <resources>
     <style name="Theme.Alfakhamah" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/night</item>

@@ -1,3 +1,7 @@
+// ملف MainActivity.java: الشاشة الوحيدة في التطبيق. التطبيق غلاف WebView حول موقع المتجر نفسه:
+// الصفحات والمنطق كلها على الخادم، وهنا فقط تحميل الموقع وإعدادات الأمان وشاشة البدء وشاشات الخطأ.
+// يستعين بـ ServerOrigin للتحقق من عنوان الخادم وبـ NavigationPolicy لتقرير ما يُفتح وما يُحظر.
+// ملفات التخطيط والنصوص في res/، والعنوان والإعدادات تأتي من app/build.gradle.kts (BuildConfig).
 package com.alfakhamah.store;
 
 import android.annotation.SuppressLint;
@@ -65,6 +69,8 @@ import androidx.core.view.WindowInsetsCompat;
  */
 public class MainActivity extends ComponentActivity {
 
+    // ---- الثوابت والحقول ----
+    // التفضيلات تُستعمل فقط في نسخ الاختبار لحفظ العنوان الذي يكتبه المختبِر.
     private static final String PREFS = "server";
     private static final String PREF_ORIGIN = "origin";
     private static final String EXTRA_START_PATH = "start_path";
@@ -72,6 +78,7 @@ public class MainActivity extends ComponentActivity {
     /** Suggested (pre-filled, editable) server for the first run of a test build. Release builds use BuildConfig only. */
     static final String SUGGESTED_ORIGIN = "https://alfakhama.onrender.com";
 
+    // عناصر الواجهة: تُربط في onCreate من res/layout/activity_main.xml.
     private WebView webView;
     private ProgressBar progress;
     private View errorView;
@@ -83,30 +90,39 @@ public class MainActivity extends ComponentActivity {
     private View root;
     private View splash;
     private boolean splashDone;
+    // مهلة أمان تخفي شاشة البدء إن تأخر التحميل (انظر showSplash).
     private final Runnable splashTimeout = this::hideSplash;
 
     private String origin;
     private String startPath = BuildConfig.START_PATH;
     private NavigationPolicy policy;
     private boolean pageFailed;
+    // حالة WebView المحفوظة بعد أن يستعيد النظام التطبيق؛ تُستعمل مرة واحدة في applyServer.
     private Bundle restoredState;
 
+    // رد اختيار الملفات: الصفحة (مثل رفع صورة منتج في لوحة الإدارة) تنتظر نتيجة منتقي الملفات.
     private ValueCallback<Uri[]> fileCallback;
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    // ---- إنشاء الشاشة ----
+    // نقطة البداية: يضبط العرض من حافة لحافة، ويربط عناصر الواجهة، ويجهّز زر الرجوع ومنتقي الملفات،
+    // ثم يضبط WebView ويحمّل العنوان المعتمد.
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         EdgeToEdge.enable(this,
                 SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
                 SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT));
         super.onCreate(savedInstanceState);
+        // قيمة start_path تُقبل إن كانت /admin/ بالضبط، حتى لا يستطيع تطبيق آخر توجيه الغلاف إلى مسار اختياري.
         // Only the admin shortcut may pick another start page, and only this one.
         if (ADMIN_START_PATH.equals(getIntent().getStringExtra(EXTRA_START_PATH))) startPath = ADMIN_START_PATH;
         setContentView(R.layout.activity_main);
         restoredState = savedInstanceState;
 
         root = findViewById(R.id.root);
+        // مع العرض من حافة لحافة نضيف هوامش لأشرطة النظام والحَدّ (cutout) ولوحة المفاتيح حتى لا
+        // يُغطّى المحتوى.
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars()
                     | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
@@ -139,6 +155,7 @@ public class MainActivity extends ComponentActivity {
             testBanner.setOnClickListener(v -> promptForServer(null));
         }
 
+        // يجب تسجيل المُطلِق داخل onCreate. يعيد اختيار المستخدم إلى الصفحة عبر fileCallback.
         fileChooserLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
             if (fileCallback != null) {
                 fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.getResultCode(), result.getData()));
@@ -146,6 +163,7 @@ public class MainActivity extends ComponentActivity {
             }
         });
 
+        // زر الرجوع: يرجع في سجل الصفحات إن أمكن، وإلا يُعطَّل الاعتراض ويُترك للنظام إغلاق الشاشة.
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -164,11 +182,14 @@ public class MainActivity extends ComponentActivity {
 
     // ---------------------------------------------------------------------------------------- server origin
 
+    // قراءة عنوان الخادم: في نسخة الإصدار يأتي دائمًا من BuildConfig ولا يمكن تغييره من داخل التطبيق.
     private SharedPreferences prefs() {
         return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     /** Returns the origin to use, or null when none is configured (or the saved one is invalid). */
+    // يختار العنوان المرشح (المحفوظ يغلب في نسخ الاختبار فقط) ويمرره على ServerOrigin.normalize.
+    // أي عنوان غير صالح يعطي null فتظهر شاشة خطأ بدل تحميل عنوان مشبوه.
     private String resolveOrigin() {
         String candidate = BuildConfig.SERVER_ORIGIN;
         if (BuildConfig.ALLOW_SERVER_OVERRIDE) {
@@ -182,6 +203,8 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    // يطبّق العنوان: عند غيابه يعرض الخطأ (ونافذة الإدخال في الاختبار)، وإلا ينشئ NavigationPolicy
+    // ثم يستعيد حالة الصفحة السابقة أو يحمّل الصفحة الأولى.
     private void applyServer(String newOrigin) {
         origin = newOrigin;
         if (origin == null) {
@@ -207,6 +230,8 @@ public class MainActivity extends ComponentActivity {
         webView.loadUrl(origin + startPath);
     }
 
+    // نافذة إدخال العنوان لنسخ الاختبار. التحقق يتم عند الضغط على حفظ؛ ننشئ الزر بمستمع null ثم نعيّن
+    // مستمعًا بعد show() كي لا تُغلق النافذة تلقائيًا عند وجود خطأ في المدخل.
     private void promptForServer(String errorText) {
         hideSplash();
         EditText input = new EditText(this);
@@ -226,12 +251,15 @@ public class MainActivity extends ComponentActivity {
         dialog.show();
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
+                // مسموح هنا بـ http المحلي لأن هذه النافذة لا تظهر إلا إذا كان ALLOW_SERVER_OVERRIDE
+                // مفعّلًا (نسخة اختبار).
                 String normalized = ServerOrigin.normalize(input.getText().toString(), true);
                 prefs().edit().putString(PREF_ORIGIN, normalized).apply();
                 dialog.dismiss();
                 hideError();
                 applyServer(normalized);
             } catch (ServerOrigin.InvalidOriginException e) {
+                // تحويل سبب الرفض إلى رسالة عربية مناسبة.
                 int message;
                 switch (e.reason) {
                     case NOT_HTTPS: message = R.string.err_origin_not_https; break;
@@ -246,6 +274,9 @@ public class MainActivity extends ComponentActivity {
 
     // ---------------------------------------------------------------------------------------- WebView
 
+    // إعداد WebView وهو قلب الأمان في التطبيق. الأذونات تُغلق افتراضيًا: لا وصول لملفات الجهاز ولا لمزوّدي
+    // المحتوى ولا للموقع الجغرافي، ويُمنع المحتوى المختلط (http داخل https)، وكوكيز الطرف الثالث معطّلة.
+    // أدوات التصحيح عن بُعد تعمل في نسخ DEBUG فقط.
     @SuppressLint("SetJavaScriptEnabled") // the storefront and the admin panel are JavaScript applications
     private void configureWebView() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
@@ -260,6 +291,7 @@ public class MainActivity extends ComponentActivity {
         s.setSupportZoom(true); // pinch-zoom stays available for accessibility (charts, tables, product photos)
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false); // no on-screen +/- overlay
+        // نافذة window.open تصل إلى ShellChrome.onCreateWindow ثم تُفحص بـ NavigationPolicy.
         s.setSupportMultipleWindows(true); // window.open() is routed through NavigationPolicy (wa.me, maps, ...)
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setMediaPlaybackRequiresUserGesture(true);
@@ -267,6 +299,7 @@ public class MainActivity extends ComponentActivity {
         // The pages skip their service worker when they see this marker: the shell handles offline natively.
         s.setUserAgentString(s.getUserAgentString() + " AlfakhamahApp/" + BuildConfig.VERSION_NAME);
 
+        // الكوكيز ضرورية لجلسة دخول المدير؛ التطبيق نفسه لا يخزّن كلمة مرور.
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, false);
@@ -276,6 +309,8 @@ public class MainActivity extends ComponentActivity {
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) -> startDownload(url, userAgent, contentDisposition, mimeType));
     }
 
+    // ---- الإجراءات المساعدة ----
+    // إعادة المحاولة بعد خطأ: يعيد قراءة العنوان إن لم يكن معرّفًا، أو يحمّل الصفحة الأولى، أو يعيد التحميل.
     private void retry() {
         hideError();
         if (origin == null) {
@@ -288,6 +323,8 @@ public class MainActivity extends ComponentActivity {
     }
 
     /** Admin pages show orders and customer phone numbers: keep them out of screenshots and the recents view. */
+    // FLAG_SECURE يمنع لقطات الشاشة ويُخفي المحتوى في قائمة التطبيقات الأخيرة. يُضبط عند بدء كل صفحة
+    // ويُزال عند مغادرة منطقة الإدارة. القرار يأتي من NavigationPolicy.isAdminArea.
     private void updateSecureFlag(String url) {
         boolean admin = policy != null && url != null && policy.isAdminArea(url);
         if (admin) {
@@ -298,6 +335,8 @@ public class MainActivity extends ComponentActivity {
     }
 
     /** Applies NavigationPolicy; returns true when the WebView must NOT load the URL itself. */
+    // إن لم يوجد policy (لا عنوان معتمد) تُحظر كل الروابط. القيمة المرجعة true تعني أن WebView لا
+    // يحمّل الرابط بنفسه.
     private boolean routeUrl(String url) {
         if (policy == null) return true;
         switch (policy.decide(url)) {
@@ -312,6 +351,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    // فتح رابط خارج التطبيق (متصفح، واتساب، اتصال...). فئة BROWSABLE تحصر الهدف في النشاطات التي تقبل الروابط.
     private void openExternally(String url) {
         try {
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE));
@@ -320,6 +360,9 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    // تنزيل ملفات التصدير للمدير عبر DownloadManager. الفحص الأول هو isDownloadAllowed (واجهة
+    // /api/admin/ على أصلنا فقط).
+    // نمرر الكوكيز الحالية لأن التصدير يحتاج جلسة المدير.
     private void startDownload(String url, String userAgent, String contentDisposition, String mimeType) {
         if (policy == null || !policy.isDownloadAllowed(url)) {
             Toast.makeText(this, R.string.link_blocked, Toast.LENGTH_SHORT).show();
@@ -336,6 +379,7 @@ public class MainActivity extends ComponentActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
         } else {
+            // السبب: بدون إذن تخزين لا يمكن الكتابة في مجلد التنزيلات العام قبل Android 10.
             // Android 7-9 would need a storage permission for the public Downloads folder; the app's own
             // folder needs none, and the download notification still opens the file.
             request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, name);
@@ -352,6 +396,7 @@ public class MainActivity extends ComponentActivity {
     // ---------------------------------------------------------------------------------------- launch screen
 
     /** Night launch screen with the gold mark; light status-bar icons while it is visible. */
+    // تحريك بسيط لعناصر شاشة البدء؛ الألوان والعناصر معرّفة في activity_main.xml.
     private void showSplash() {
         systemBarsLight(false);
         View content = findViewById(R.id.splash_content);
@@ -368,6 +413,7 @@ public class MainActivity extends ComponentActivity {
         mainHandler.postDelayed(splashTimeout, 10_000);
     }
 
+    // إخفاء شاشة البدء مرة واحدة فقط (splashDone) مع إلغاء المهلة المؤجلة.
     private void hideSplash() {
         if (splashDone) return;
         splashDone = true;
@@ -377,6 +423,7 @@ public class MainActivity extends ComponentActivity {
         splash.animate().alpha(0f).setDuration(450).withEndAction(() -> splash.setVisibility(View.GONE)).start();
     }
 
+    // تبديل لون أيقونات شريط الحالة والتنقل: فاتحة فوق الخلفية الداكنة، وداكنة فوق خلفية المتجر الفاتحة.
     private void systemBarsLight(boolean light) {
         WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(getWindow(), root);
         bars.setAppearanceLightStatusBars(light);
@@ -385,6 +432,7 @@ public class MainActivity extends ComponentActivity {
 
     // ---------------------------------------------------------------------------------------- error screen
 
+    // عرض شاشة الخطأ بدل صفحة الويب (يُخفى WebView لكن يبقى حيًّا).
     private void showError(String title, String message, boolean canRetry) {
         errorTitle.setText(title);
         errorMessage.setText(message);
@@ -401,7 +449,10 @@ public class MainActivity extends ComponentActivity {
         webView.setVisibility(View.VISIBLE);
     }
 
+    // ---- عميل WebView: التنقل وأخطاء التحميل ----
+    // يعالج أحداث الصفحة: تطبيق سياسة الروابط، وإظهار شاشة الخطأ عند فشل الإطار الرئيسي فقط.
     private final class ShellClient extends WebViewClient {
+        // كل تنقل بين الصفحات يمر من هنا ويخضع لـ NavigationPolicy.
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             return routeUrl(request.getUrl().toString());
@@ -431,6 +482,7 @@ public class MainActivity extends ComponentActivity {
             showError(getString(R.string.err_offline_title), getString(R.string.err_offline_message), true);
         }
 
+        // أخطاء 5xx للصفحة الرئيسية فقط تعطي شاشة خطأ؛ أخطاء الموارد الفرعية لا تهمّ المستخدم.
         @Override
         public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
             if (request.isForMainFrame() && response.getStatusCode() >= 500) {
@@ -441,6 +493,7 @@ public class MainActivity extends ComponentActivity {
 
         @Override
         public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+            // عدم تجاوز أي مشكلة شهادة هو قرار أمان مقصود: لا يوجد خيار للمتابعة بالرغم من الخطأ.
             handler.cancel(); // never continue past a certificate problem
             pageFailed = true;
             showError(getString(R.string.err_ssl_title), getString(R.string.err_ssl_message), true);
@@ -454,6 +507,7 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    // ---- عميل Chrome: التقدم والملفات والنوافذ وحوارات JavaScript ----
     private final class ShellChrome extends WebChromeClient {
         @Override
         public void onProgressChanged(WebView view, int newProgress) {
@@ -462,6 +516,7 @@ public class MainActivity extends ComponentActivity {
             progress.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
         }
 
+        // اختيار ملف للرفع. يُلغى الطلب السابق المعلّق (بقيمة null) لأن WebView لا يقبل أكثر من رد واحد.
         @Override
         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
             if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -476,6 +531,8 @@ public class MainActivity extends ComponentActivity {
             return true;
         }
 
+        // window.open: ننشئ WebView مؤقتًا فقط لالتقاط الرابط، ثم نمرره على سياسة التنقل ونتخلص منه.
+        // handled تمنع المعالجة المزدوجة لأن الحدثين shouldOverrideUrlLoading وonPageStarted قد يصلان معًا.
         @Override
         public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
             if (!isUserGesture) return false; // no pop-ups without a tap
@@ -506,6 +563,8 @@ public class MainActivity extends ComponentActivity {
             return true;
         }
 
+        // ---- حوارات JavaScript (alert وconfirm) ----
+        // إن كانت الشاشة تُغلق نلغي النتيجة كي لا تبقى الصفحة معلّقة في انتظار حوار لن يظهر.
         // JavaScript dialogs are not shown by a WebView unless the app implements them; the admin panel
         // relies on confirm() before deleting products and categories.
         @Override
@@ -540,6 +599,7 @@ public class MainActivity extends ComponentActivity {
 
     // ---------------------------------------------------------------------------------------- lifecycle
 
+    // حفظ صفحة WebView ليعود المستخدم إليها إذا أنهى النظام العملية في الخلفية (تُستعاد في applyServer).
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -552,6 +612,7 @@ public class MainActivity extends ComponentActivity {
         webView.onResume();
     }
 
+    // flush يكتب الكوكيز على القرص فلا تضيع جلسة الدخول إذا قُتل التطبيق.
     @Override
     protected void onPause() {
         CookieManager.getInstance().flush();
@@ -559,6 +620,7 @@ public class MainActivity extends ComponentActivity {
         super.onPause();
     }
 
+    // تنظيف: إنهاء طلب الملفات المعلّق، وفصل WebView من الشاشة قبل تدميره لتفادي تسرب الذاكرة.
     @Override
     protected void onDestroy() {
         if (fileCallback != null) {

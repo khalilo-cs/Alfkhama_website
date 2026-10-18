@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- ملف themes.xml: الثيم الأساسي بلا شريط عنوان، بخلفية داكنة (night) مطابقة لشاشة البدء لتفادي -->
+<!-- وميض أبيض عند التشغيل. -->
 <resources>
     <!-- Android 7-8.0. Android 8.1+ (values-v27) adds a light navigation bar and edge-to-edge cutout layout. -->
     <style name="Theme.Alfakhamah" parent="android:Theme.Material.Light.NoActionBar">

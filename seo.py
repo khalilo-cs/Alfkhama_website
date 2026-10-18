@@ -1,9 +1,16 @@
+# ------------------------------------------------------------------------------------------------------------------
+# seo.py: دوال نقية (بلا قراءة ملفات أو قاعدة بيانات) تبني ما يقرؤه محركات البحث ومعاينات الروابط: وسوم الرأس،
+# بيانات JSON-LD المنظَّمة، sitemap.xml، robots.txt. يستدعيها app.py عند تقديم الصفحات، ويستورد منها legal.py
+# دوال التهريب والتحقق. تعتمد على وسوم لها معرّفات في index.html (مثل metaDescription) يعيد الخادم كتابتها.
+# الإعدادات القادمة من المدير تُتحقق وتُهرَّب هنا قبل أن تصل إلى أي صفحة، فلا تُحقن شيفرة عبرها.
+# ------------------------------------------------------------------------------------------------------------------
 """Server-side HTML for search engines and link previews: per-page meta tags, JSON-LD, sitemap, robots.
 
 Crawlers and chat apps (WhatsApp, Telegram, X) read the first HTML response and usually do not run JavaScript,
 so the title, description, canonical URL, Open Graph image and structured data are written here, not by the page.
 Pure functions (no I/O) so they are unit-testable.
 """
+# ---- الاستيرادات ----
 from __future__ import annotations
 
 import html
@@ -11,13 +18,18 @@ import json
 import re
 from urllib.parse import quote
 
+# ---- الثوابت وأنماط التحقق ----
+# اسم احتياطي يُستخدم إذا لم يضبط المالك اسم المتجر في الإعدادات.
 SITE_NAME_FALLBACK = "الفخامة للأقمشة والستائر"
 # Google settings the owner may fill in (Settings → "جوجل والتحليلات"). Validated on save AND again before every use,
 # so a value that slipped into the shared database some other way can never reach a page, an attribute or the CSP.
+# معرّف قياس GA4 يبدأ بـ G- ثم حروف كبيرة وأرقام؛ fullmatch يرفض أي زيادة (مسافات أو علامات اقتباس أو وسوم).
 GA4_ID_RE = re.compile(r"G-[A-Z0-9]{4,15}")
 SITE_VERIFICATION_RE = re.compile(r"[A-Za-z0-9_-]{10,120}")
 
 
+# ---- أدوات مساعدة ----
+# تهريب HTML (بما فيه علامات الاقتباس) لأي قيمة قبل وضعها في نص أو في خاصية وسم؛ None تصبح نصًا فارغًا.
 def esc(value: object) -> str:
     return html.escape(str(value if value is not None else ""), quote=True)
 
@@ -34,22 +46,26 @@ def site_verification(settings: dict) -> str:
     return value if SITE_VERIFICATION_RE.fullmatch(value) else ""
 
 
+# وسم تحقق Google Search Console جاهزًا للإدراج، أو '' إذا لم يوجد رمز صالح.
 def verification_meta(settings: dict) -> str:
     token = site_verification(settings)
     return f'<meta name="google-site-verification" content="{esc(token)}">' if token else ""
 
 
+# يحوّل مسارًا نسبيًا إلى رابط مطلق (تحتاجه معاينات الروابط وsitemap)؛ الروابط التي تبدأ بـ http(s) تبقى كما هي.
 def absolute(base: str, path: str) -> str:
     if not path:
         return ""
     return path if re.match(r"https?://", path) else f"{base}{path if path.startswith('/') else '/' + path}"
 
 
+# استبدال < بـ \u003c يمنع نص مثل </script> داخل بيانات المنتج من إغلاق وسم script (حقن)، والـ JSON يبقى صالحًا.
 def jsonld(data: dict | list) -> str:
     """JSON safe to embed inside <script>: a literal '</' or '<!--' can never close/escape the element."""
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
+# المعرّف (slug) يُرمَّز كاملًا (safe='') فلا يستطيع أن يحمل / أو أحرفًا خاصة تغيّر المسار.
 def product_path(slug: str) -> str:
     return f"/product/{quote(slug, safe='')}"
 
@@ -58,12 +74,15 @@ def category_path(slug: str) -> str:
     return f"/category/{quote(slug, safe='')}"
 
 
+# ---- الصفحات ----
 HOME_LABEL = "الرئيسية"
 # Store pages listed in the sitemap: (path, changefreq, priority).
 MAIN_PAGES = [("/products", "daily", "0.9"), ("/categories", "weekly", "0.7"), ("/about", "monthly", "0.5"),
               ("/contact", "monthly", "0.5"), ("/faq", "monthly", "0.5")]
 
 
+# ---- العنوان والوصف ----
+# اختصار وصف لسطر واحد: توحيد المسافات ثم القص عند آخر كلمة كاملة (لا تُقطع كلمة) وإضافة ….
 def clip(text: str, limit: int = 155) -> str:
     """One line of plain text for a meta description, cut on a word boundary."""
     text = re.sub(r"\s+", " ", text or "").strip()
@@ -73,6 +92,7 @@ def clip(text: str, limit: int = 155) -> str:
     return (cut or text[:limit]) + "…"
 
 
+# يعيد (العنوان، الوصف) لكل نوع صفحة. تُبنى النصوص من إعدادات المتجر وبيانات الكتالوج فقط ولا تُضاف ادعاءات من عندنا.
 def page_meta(page: str, settings: dict, **ctx) -> tuple[str, str]:
     """(title, description) of a server-rendered page. Only store settings and catalogue data, no invented claims."""
     store = settings.get("store_name") or SITE_NAME_FALLBACK
@@ -102,6 +122,8 @@ def page_meta(page: str, settings: dict, **ctx) -> tuple[str, str]:
     return f"الصفحة غير موجودة | {store}", "الصفحة المطلوبة غير موجودة. ابحث في المنتجات أو تصفّح الأقسام."
 
 
+# ---- بيانات JSON-LD المنظَّمة (schema.org) ----
+# مسار التنقّل (فتات الخبز) كما يظهر للزائر، لتعرضه نتائج البحث.
 def breadcrumb_schema(base: str, crumbs: list[tuple[str, str]]) -> dict:
     """crumbs = [(name, path), ...] from the home page down to the current page (matches the visible breadcrumbs)."""
     return {"@context": "https://schema.org", "@type": "BreadcrumbList",
@@ -109,6 +131,7 @@ def breadcrumb_schema(base: str, crumbs: list[tuple[str, str]]) -> dict:
                                 for i, (name, path) in enumerate(crumbs, 1)]}
 
 
+# صفحة تجميعية (أقسام أو منتجات) مع قائمة بأول 100 عنصر فقط حتى لا يتضخم الرأس.
 def collection_schema(base: str, path: str, name: str, description: str, items: list[tuple[str, str]]) -> dict:
     """CollectionPage whose mainEntity is an ItemList of (name, path) entries (products or categories)."""
     return {"@context": "https://schema.org", "@type": "CollectionPage", "name": name, "description": description,
@@ -118,12 +141,14 @@ def collection_schema(base: str, path: str, name: str, description: str, items: 
                                                for i, (n, p) in enumerate(items[:100], 1)]}}
 
 
+# كيان المتجر نفسه لتضمينه داخل صفحات «من نحن» و«تواصل»؛ يُحذف @context لأنه مضمَّن في كائن أب يحمله.
 def _store_entity(settings: dict, base: str, ready: bool, image: str) -> dict:
     entity = store_schema(settings, base, ready, image)
     entity.pop("@context", None)
     return entity
 
 
+# صفحات «من نحن» و«تواصل معنا» و«الأسئلة الشائعة»: كل منها يغلّف بيانات المتجر أو الأسئلة بنوع schema.org المناسب.
 def about_schema(base: str, settings: dict, ready: bool, image: str, name: str, description: str) -> dict:
     return {"@context": "https://schema.org", "@type": "AboutPage", "name": name, "description": description,
             "url": base + "/about", "inLanguage": "ar-SA", "mainEntity": _store_entity(settings, base, ready, image)}
@@ -139,6 +164,7 @@ def faq_schema(faq: list[tuple[str, str]]) -> dict:
             "mainEntity": [{"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in faq]}
 
 
+# بيانات المتجر المحلي. مع ready=False (غير منشور) نقتصر على الاسم والوصف، فلا نعلن الهاتف والعنوان قبل النشر.
 def store_schema(settings: dict, base: str, ready: bool, image: str) -> dict:
     schema: dict = {
         "@context": "https://schema.org",
@@ -159,12 +185,14 @@ def store_schema(settings: dict, base: str, ready: bool, image: str) -> dict:
         if settings.get("address") or settings.get("city"):
             schema["address"] = {"@type": "PostalAddress", "streetAddress": settings.get("address") or None,
                                  "addressLocality": settings.get("city") or "جدة", "addressCountry": "SA"}
+            # حذف الحقول الفارغة من العنوان حتى لا يظهر None في JSON.
             schema["address"] = {k: v for k, v in schema["address"].items() if v}
         if settings.get("instagram"):
             schema["sameAs"] = [settings["instagram"]]
     return schema
 
 
+# بيانات الموقع العامة (WebSite) للصفحة الرئيسية.
 def website_schema(settings: dict, base: str) -> dict:
     return {"@context": "https://schema.org", "@type": "WebSite", "name": settings.get("store_name") or SITE_NAME_FALLBACK,
             "url": base + "/", "inLanguage": "ar-SA"}
@@ -175,6 +203,7 @@ def product_schema(product: dict, settings: dict, base: str) -> list[dict]:
     A price of 0 means 'price on request': Google only accepts a Product with an Offer (or reviews/ratings, which we never
     invent), so such products get the BreadcrumbList alone rather than an invalid Product item."""
     url = base + product_path(product["slug"])
+    # صور المنتج: كل الصور المرفقة إن وُجدت، وإلا صورته الرئيسية.
     images = [absolute(base, i["url"]) for i in product.get("images", [])] or ([absolute(base, product.get("image", ""))] if product.get("image") else [])
     data: dict = {
         "@context": "https://schema.org", "@type": "Product", "name": product["name"], "url": url,
@@ -188,6 +217,7 @@ def product_schema(product: dict, settings: dict, base: str) -> list[dict]:
             "availability": "https://schema.org/InStock" if product.get("stock", 0) > 0 else "https://schema.org/OutOfStock",
             "seller": {"@type": "Organization", "name": settings.get("store_name") or SITE_NAME_FALLBACK},
         }
+    # نحذف الحقول الفارغة (None أو نص فارغ أو قائمة فارغة) كي لا تظهر في JSON-LD.
     data = {k: v for k, v in data.items() if v not in (None, "", [])}
     trail = [(HOME_LABEL, "/")]
     if product.get("category"):
@@ -197,6 +227,9 @@ def product_schema(product: dict, settings: dict, base: str) -> list[dict]:
     return [data, crumbs] if "offers" in data else [crumbs]
 
 
+# ---- كتابة رأس الصفحة داخل قالب index.html ----
+# كل صف: (المفتاح، نمط regex يلتقط وسمًا له معرّف في القالب، دالة تبني الوسم الجديد بقيمة مهرَّبة).
+# إذا اختفى وسم من القالب يرفع render_page خطأ فنكتشف الخلل فورًا بدل أن تُقدَّم صفحات بلا بيانات SEO.
 _REPLACEMENTS = (
     ("title", re.compile(r"<title>.*?</title>", re.S), lambda v: f"<title>{esc(v)}</title>"),
     ("description", re.compile(r'<meta id="metaDescription"[^>]*>'), lambda v: f'<meta id="metaDescription" name="description" content="{esc(v)}">'),
@@ -209,6 +242,8 @@ _REPLACEMENTS = (
 )
 
 
+# يستبدل وسوم الرأس في القالب بقيم الصفحة الحالية ويضيف وسوم المعاينة (Open Graph وTwitter) وlinks البدائل.
+# بما أن المتصفح قد لا ينفّذ سكربتات الصفحة عند الزحف، نكتب هذه البيانات من الخادم مباشرة.
 def render_page(template: str, *, title: str, description: str, robots: str, canonical: str, og_url: str, og_image: str,
                 og_type: str, schemas: list[dict], site_name: str, preload_image: str = "", image_alt: str = "",
                 verification: str = "") -> str:
@@ -216,6 +251,7 @@ def render_page(template: str, *, title: str, description: str, robots: str, can
     verification = the Search Console token (already validated, see site_verification()); '' adds nothing."""
     values = {"title": title, "description": description, "robots": robots, "og_title": title, "og_description": description,
               "og_image": og_image, "og_url": og_url, "canonical": canonical}
+    # subn بعدد 1 وبدالة lambda: نستبدل أول تطابق فقط، والدالة تمنع تفسير \ في القيمة كأنها مرجع للنمط.
     out = template
     for key, pattern, build in _REPLACEMENTS:
         out, count = pattern.subn(lambda _m, b=build, k=key: b(values[k]), out, count=1)
@@ -223,10 +259,12 @@ def render_page(template: str, *, title: str, description: str, robots: str, can
             raise RuntimeError(f"index.html is missing the '{key}' tag the server rewrites")
     out = out.replace('<meta property="og:type" content="website">', f'<meta property="og:type" content="{esc(og_type)}">', 1)
     # the page's own script rebuilds JSON-LD for the live store settings; the server writes the crawler-visible copy
+    # الكتلة الأولى تحمل المعرّف localBusinessSchema لأن سكربت الصفحة يعيد بناءها لاحقًا؛ البقية بلا معرّف.
     ld = "".join(f'<script{" id=\"localBusinessSchema\"" if i == 0 else ""} type="application/ld+json">{jsonld(sc)}</script>' for i, sc in enumerate(schemas))
     out, count = re.subn(r'<script id="localBusinessSchema" type="application/ld\+json">.*?</script>', lambda _m: ld, out, count=1, flags=re.S)
     if count != 1:
         raise RuntimeError("index.html is missing the JSON-LD block the server rewrites")
+    # وسوم إضافية تُضاف قبل </head>: العناصر الفارغة (حسب وجود الصورة أو الرابط الأساسي) تُحذف عند الدمج.
     extra = [
         f'<meta property="og:site_name" content="{esc(site_name)}">',
         f'<meta property="og:image:alt" content="{esc(image_alt or title)}">' if og_image else "",
@@ -242,6 +280,8 @@ def render_page(template: str, *, title: str, description: str, robots: str, can
     return out.replace("</head>", "  " + "\n  ".join(e for e in extra if e) + "\n</head>", 1)
 
 
+# ---- sitemap.xml و robots.txt ----
+# خريطة الموقع: الرئيسية ثم الصفحات الرئيسية والقانونية والأقسام ثم كل منتج (مع آخر تعديل وصورته). كل رابط يُهرَّب.
 def sitemap_xml(base: str, products: list[dict], extra_pages: list[str], main_pages: list[tuple[str, str, str]] | None = None,
                 categories: list[str] | None = None) -> str:
     """Home, the store pages (main_pages), legal pages (extra_pages), category pages (slugs) and every product with its photo."""
@@ -254,6 +294,7 @@ def sitemap_xml(base: str, products: list[dict], extra_pages: list[str], main_pa
         urls.append(f"<url><loc>{esc(base + category_path(slug))}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>")
     for p in products:
         loc = base + product_path(p["slug"])
+        # lastmod: أول 10 خانات من الطابع الزمني فقط (YYYY-MM-DD).
         lastmod = (p.get("updated_at") or "")[:10]
         image = absolute(base, p.get("image", ""))
         urls.append(
@@ -266,6 +307,7 @@ def sitemap_xml(base: str, products: list[dict], extra_pages: list[str], main_pa
             + "".join(urls) + "</urlset>")
 
 
+# إذا لم يُنشر المتجر بعد نمنع الزحف كليًا؛ وإلا نسمح بكل شيء عدا /admin و /api/ ونشير إلى الخريطة.
 def robots_txt(base: str, ready: bool) -> str:
     if not ready:
         return "User-agent: *\nDisallow: /\n"

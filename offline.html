@@ -5,20 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#15130f">
   <meta name="robots" content="noindex">
+  <!-- صفحة "لا يوجد اتصال": يعرضها sw.js (الـ Service Worker) بدل الصفحة المطلوبة عند انقطاع الإنترنت. -->
+  <!-- ملف مستقل بتنسيقه وسكربته الداخليين كي يعمل دون أي ملف آخر، ويُحفظ مسبقًا في كاش المتصفح. -->
   <title>لا يوجد اتصال | الفخامة للأقمشة والستائر</title>
   <style>
+    /* تنسيق الصفحة: خلفية داكنة بنفس هوية المتجر (ليلي وذهبي) مع توسيط المحتوى في منتصف الشاشة. */
     body{margin:0;min-height:100vh;display:grid;place-items:center;background:#15130f;color:#fdfaf4;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;line-height:1.8;padding:24px;text-align:center}
     main{max-width:420px}
+    /* الشعار الذهبي المدوّر أعلى الصفحة. */
     .mark{width:64px;height:64px;border-radius:20px;background:linear-gradient(135deg,#f0dcae,#d3ad6b 42%,#b28642);color:#15130f;display:grid;place-items:center;margin:0 auto 20px}
     .mark svg{width:38px;height:38px}
     h1{font-size:22px;margin:0 0 8px}
     p{color:#d8cfbd;font-size:16px;margin:0 0 24px}
+    /* زر "إعادة المحاولة": الحد الأدنى للارتفاع 48px ليسهل الضغط عليه بالإصبع. */
     button{border:0;border-radius:999px;background:linear-gradient(135deg,#f0dcae,#d3ad6b 42%,#b28642);color:#15130f;font:inherit;font-weight:700;padding:12px 28px;min-height:48px;cursor:pointer}
+    /* بيانات التواصل (الهاتف والعنوان) لتبقى متاحة للزبون حتى دون اتصال. */
     .contact{margin:22px 0 0;font-size:15px;color:#d8cfbd}
     .contact a{color:#ead6a6;font-weight:700;text-underline-offset:4px;display:inline-flex;align-items:center;min-height:44px}
+    /* حلقة تركيز واضحة لمستخدمي لوحة المفاتيح. */
     button:focus-visible{outline:3px solid #ead6a6;outline-offset:3px}
   </style>
 </head>
+<!-- ---- محتوى الصفحة: رسالة الانقطاع وزر إعادة المحاولة وبيانات التواصل بالمتجر ---- -->
 <body>
   <main>
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V6l8 6 8-6v12"/><path d="M8 18v-5m8 5v-5"/></svg></div>
@@ -27,6 +35,7 @@
     <button type="button" id="retry">إعادة المحاولة</button>
     <p class="contact" role="note">يمكنك الاتصال بالمتجر مباشرة: <a href="tel:+966576486491" dir="ltr">+966 57 648 6491</a><br>شارع المكرونة، مجمع الشرق، حي مشرفة، جدة 23444</p>
   </main>
+  <!-- السكربت أدناه: زر إعادة المحاولة وعودة الاتصال (حدث online) كلاهما يعيد تحميل الصفحة. -->
   <script>document.getElementById('retry').addEventListener('click',function(){location.reload()});window.addEventListener('online',function(){location.reload()});</script>
 </body>
 </html>

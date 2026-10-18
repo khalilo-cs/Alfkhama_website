@@ -1,3 +1,6 @@
+# ملخص للمبتدئ: على استضافة مثل Render يُمسح القرص عند كل إعادة تشغيل، لذلك يحفظ persist.py لقطة من قاعدة SQLite
+# والصور في مخزن S3 خارجي ويستعيدها عند الإقلاع. هذا الملف يختبر ذلك كله بدون الاتصال بأي مخزن حقيقي.
+# الترتيب: مخزن S3 مزيّف ← أدوات مساعدة ← اختبارات التوقيع والإعداد ← اللقطة والاستعادة ← الخادم الحقيقي.
 """اختبارات الحفظ الدائم (persist.py): توقيع SigV4، لقطة/استعادة، الإحصاءات، SIGTERM، والأمان.
 
 المخزن هنا خادم S3 مزيّف صغير يعمل في العملية نفسها ويتحقق من توقيع كل طلب. إن وُجد moto_server في PATH
@@ -33,6 +36,8 @@ from test_app import JPEG, PNG, ROOT, ServerCase, data_uri, free_port  # noqa: E
 
 import persist  # noqa: E402
 
+# ---- ثوابت الاختبار ----
+# مفاتيح وهمية للاختبار فقط (ليست أسراراً حقيقية)، واسم الحاوية، ونمط الأسماء المسموحة لملفات uploads.
 FAKE_ACCESS = "AKIAFAKETESTONLY0000"
 FAKE_SECRET = "fake-secret-for-tests-only-000000"
 BUCKET = "test-bucket"
@@ -42,7 +47,10 @@ NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}")
 # ----------------------------------------------------------------------------------------------------------------
 # مخزن S3 مزيّف: PUT/GET/HEAD/DELETE/ListObjectsV2 مع التحقق من SigV4
 # ----------------------------------------------------------------------------------------------------------------
+# يشغّل خادم HTTP صغيراً يتصرف كمخزن S3: يخزّن الكائنات في الذاكرة ويتحقق من توقيع SigV4 لكل طلب بإعادة حسابه
+# بنفس دالة persist.sign_request. الحقول العامة (fail_next, put_gate, truncate_get...) تتيح للاختبارات محاكاة الأعطال.
 class FakeS3:
+    # page_size صغير (2) لإجبار الترقيم على صفحات متعددة في ListObjectsV2؛ verify=False يعطّل فحص التوقيع.
     def __init__(self, page_size: int = 2, verify: bool = True):
         self.objects: dict[str, bytes] = {}
         self.log: list[tuple[str, str]] = []        # (method, key)
@@ -56,10 +64,13 @@ class FakeS3:
         self.lock = threading.Lock()
         outer = self
 
+        # معالج الطلبات: يفهم PUT/GET/HEAD/DELETE وقائمة الكائنات (list-type=2) بمسار على نمط path-style:
+        # /الحاوية/المفتاح.
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
 
+            # يقسم المسار إلى (الحاوية، المفتاح، معاملات الاستعلام، الأجزاء الخام).
             def _split(self):
                 parts = urllib.parse.urlsplit(self.path)
                 segs = parts.path.split("/", 2)           # "", bucket, key
@@ -75,10 +86,13 @@ class FakeS3:
                 if self.command != "HEAD":
                     self.wfile.write(body)
 
+            # يرد بخطأ XML على نمط S3؛ عند leak_secret_in_errors يضع السر الوهمي في الرسالة لاختبار أن persist
+            # لا يسرّبه.
             def _error(self, status, code):
                 extra = f"<Message>{FAKE_SECRET}</Message>" if outer.leak_secret_in_errors else ""
                 self._reply(status, f"<Error><Code>{code}</Code>{extra}</Error>".encode())
 
+            # يتحقق من ترويسة Authorization: الصيغة، مفتاح الوصول، هاش المحتوى، ثم يعيد حساب التوقيع ويقارنه بالمرسل.
             def _auth_ok(self, body: bytes) -> bool:
                 if not outer.verify:
                     return True
@@ -97,6 +111,8 @@ class FakeS3:
                                               self.headers.get("x-amz-content-sha256", ""), FAKE_ACCESS, FAKE_SECRET, m.group(3), when)
                 return expect["authorization"] == auth
 
+            # المسار الرئيسي لكل الطرق. ترتيب الفحوص: تسجيل الطلب، إخفاق مفتعل (503)، التوقيع (403)، الحاوية
+            # (404)، ثم تنفيذ الطريقة.
             def _handle(self):
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length) if length else b""
@@ -110,6 +126,7 @@ class FakeS3:
                     return self._error(403, "SignatureDoesNotMatch")
                 if bucket != BUCKET:
                     return self._error(404, "NoSuchBucket")
+                # حفظ كائن. put_gate يوقف الطلب عمداً لمحاكاة رفع بطيء، وfail_put_prefix يرفض مفاتيح معيّنة.
                 if self.command == "PUT":
                     if outer.put_gate is not None:
                         outer.put_gate.wait(30)
@@ -127,6 +144,7 @@ class FakeS3:
                         data = outer.objects.get(key)
                     if data is None:
                         return self._error(404, "NoSuchKey")
+                    # محاكاة انقطاع التحميل: نعلن Content-Length كاملاً لكن نرسل 10 بايتات فقط ثم نغلق الاتصال.
                     if self.command == "GET" and outer.truncate_get > 0 and len(data) > 10:
                         outer.truncate_get -= 1
                         self.send_response(200)
@@ -137,6 +155,7 @@ class FakeS3:
                         self.close_connection = True
                         return
                     return self._reply(200, data, "application/octet-stream")
+                # ListObjectsV2 بترقيم: continuation-token هنا هو ببساطة موضع البداية في القائمة المرتبة.
                 if self.command == "GET" and query.get("list-type") == "2":
                     prefix = query.get("prefix", "")
                     with outer.lock:
@@ -166,23 +185,29 @@ class FakeS3:
         self.server.shutdown()
         self.server.server_close()
 
+    # أسماء الكائنات المخزنة (مرتبة) التي تبدأ بالبادئة المعطاة.
     def keys(self, prefix=""):
         with self.lock:
             return sorted(k for k in self.objects if k.startswith(prefix))
 
+    # عدد الطلبات المسجلة بطريقة HTTP معينة ومفتاح يبدأ بالبادئة (لقياس عدد مرات الرفع).
     def count(self, method: str, prefix: str = "") -> int:
         with self.lock:
             return sum(1 for m, k in self.log if m == method and k.startswith(prefix))
 
+    # متغيرات البيئة التي يحتاجها app.py/persist.py ليتصل بهذا المخزن المزيّف.
     def env(self, **extra) -> dict:
         return {"BACKUP_S3_ENDPOINT": self.endpoint, "BACKUP_S3_BUCKET": BUCKET, "BACKUP_S3_ACCESS_KEY": FAKE_ACCESS,
                 "BACKUP_S3_SECRET_KEY": FAKE_SECRET, "BACKUP_S3_REGION": "auto", **extra}
 
 
+# ---- أدوات مساعدة ----
+# يبني إعداد persist جاهزاً بفاصل زمني قصير (ثانية) كي لا تطول الاختبارات.
 def make_cfg(endpoint: str, interval=1, analytics=600, prefix="alfakhama/", bucket=BUCKET) -> persist.Config:
     return persist.Config(endpoint, bucket, FAKE_ACCESS, FAKE_SECRET, "auto", prefix, interval, analytics)
 
 
+# ينشئ كائن Persistence على مجلد بيانات معيّن؛ المحاولات قليلة والانتظار بينها شبه معدوم، والسجل يُجمع في قائمة للفحص.
 def make_persist(data_dir: Path, endpoint: str, logs: list | None = None, **cfg_kw) -> persist.Persistence:
     cfg = make_cfg(endpoint, **cfg_kw)
     client = persist.S3Client(cfg, timeout=5, attempts=2, backoff=0.01, sleep=lambda s: None)
@@ -192,6 +217,7 @@ def make_persist(data_dir: Path, endpoint: str, logs: list | None = None, **cfg_
                                default_settings={"store_name": "x", "site_ready": "0"}, client=client)
 
 
+# marker قيمة نضعها في جدول settings لنعرف بعد الاستعادة أي قاعدة وصلت؛ orders/views أعداد للمقارنة.
 def make_db(path: Path, orders: int = 0, views: int = 0, marker: str = "") -> None:
     """قاعدة صغيرة بالجداول المطلوبة (الحد الأدنى الذي تتحقق منه الاستعادة)."""
     conn = sqlite3.connect(path)
@@ -216,6 +242,7 @@ def make_db(path: Path, orders: int = 0, views: int = 0, marker: str = "") -> No
     conn.close()
 
 
+# يعيد (عدد الطلبات، عدد الزيارات، قيمة marker) من قاعدة لمقارنة ما استُعيد بما حُفظ.
 def read_db(path: Path):
     conn = sqlite3.connect(path)
     try:
@@ -227,6 +254,7 @@ def read_db(path: Path):
 
 
 # ----------------------------------------------------------------------------------------------------------------
+# ---- توقيع AWS SigV4 ----
 class SigV4Tests(unittest.TestCase):
     def test_official_aws_get_object_example(self):
         """مثال GET Object الرسمي من توثيق AWS (Signature Calculations for the Authorization Header):
@@ -241,13 +269,16 @@ class SigV4Tests(unittest.TestCase):
                          "Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41")
         self.assertEqual(out["x-amz-date"], "20130524T000000Z")
 
+    # الترميز القانوني: الشرطة المائلة تبقى أو تُرمَّز حسب الحاجة، والمعاملات تُرتَّب أبجدياً.
     def test_uri_and_query_encoding(self):
         self.assertEqual(persist.uri_encode("a b/é~-_.", keep_slash=True), "a%20b/%C3%A9~-_.")
         self.assertEqual(persist.uri_encode("a/b"), "a%2Fb")
         self.assertEqual(persist.canonical_query({"prefix": "a b/", "list-type": "2"}), "list-type=2&prefix=a%20b%2F")
 
 
+# ---- قراءة الإعداد من متغيرات البيئة ----
 class ConfigTests(unittest.TestCase):
+    # يحمّل الإعداد من بيئة أساسية صالحة؛ تمرير قيمة None يحذف المتغير. يعيد (الإعداد، رسائل السجل).
     def cfg(self, **env):
         logs: list[str] = []
         base = {"BACKUP_S3_ENDPOINT": "https://x.example.com", "BACKUP_S3_BUCKET": "b", "BACKUP_S3_ACCESS_KEY": FAKE_ACCESS,
@@ -255,6 +286,7 @@ class ConfigTests(unittest.TestCase):
         base.update(env)
         return persist.load_config({k: v for k, v in base.items() if v is not None}, log=logs.append), logs
 
+    # النسخ الاحتياطي يتعطل بصمت (None) إن نقص أي متغير مطلوب، ويُسجَّل اسم المتغير الناقص.
     def test_disabled_unless_everything_set(self):
         self.assertIsNone(persist.load_config({}, log=lambda m: None))
         for missing in ("BACKUP_S3_ENDPOINT", "BACKUP_S3_BUCKET", "BACKUP_S3_ACCESS_KEY", "BACKUP_S3_SECRET_KEY"):
@@ -262,6 +294,8 @@ class ConfigTests(unittest.TestCase):
             self.assertIsNone(cfg, missing)
             self.assertTrue(any(missing in line for line in logs))
 
+    # القيم الافتراضية، وعدم ظهور السر في repr، ورفض النقاط الخاطئة: http لغير localhost، بروتوكول غير
+    # http/https، اسم حاوية فيه شرطة.
     def test_defaults_and_validation(self):
         cfg, _ = self.cfg()
         self.assertEqual((cfg.region, cfg.prefix, cfg.interval, cfg.analytics_interval), ("auto", "alfakhama/", 120, 600))
@@ -276,6 +310,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(self.cfg(BACKUP_S3_BUCKET="bad/bucket")[0])
 
 
+# ---- اختبارات اللقطة والاستعادة ----
+# أساس مشترك: مخزن مزيّف جديد ومجلدان مؤقتان؛ a يمثل الخادم القديم وb يمثل خادماً جديداً بقرص فارغ.
 class StoreCase(unittest.TestCase):
     def setUp(self):
         self.store = FakeS3()
@@ -288,7 +324,9 @@ class StoreCase(unittest.TestCase):
         self.b.mkdir()
 
 
+# اللقطة (snapshot) ترفع القاعدة والصور، والاستعادة (restore_on_startup) تعيدها على قرص فارغ.
 class SnapshotRestoreTests(StoreCase):
+    # الدورة الكاملة: حفظ من a ثم استعادة في b والتأكد من تطابق القاعدة والصور.
     def test_roundtrip_db_and_uploads_and_signed_requests(self):
         make_db(self.a / "store.db", orders=3, views=41, marker="m1")
         (self.a / "uploads").mkdir()
@@ -310,6 +348,7 @@ class SnapshotRestoreTests(StoreCase):
         self.assertEqual((self.b / "uploads" / "photo2.jpg").read_bytes(), JPEG)
         self.assertFalse(q.blocked)
 
+    # الصور لا تُرفع إلا مرة واحدة، واللقطات القديمة تُقلَّم حسب سياسة الاحتفاظ.
     def test_second_snapshot_uploads_only_new_files_and_prunes_to_five(self):
         make_db(self.a / "store.db", marker="v0")
         (self.a / "uploads").mkdir()
@@ -333,6 +372,7 @@ class SnapshotRestoreTests(StoreCase):
         latest = json.loads(self.store.objects["alfakhama/latest.json"])["db_key"]
         self.assertIn("alfakhama/" + latest, db_keys, "اللقطة التي يشير إليها latest.json لا تُحذف")
 
+    # أمان البيانات: إن كانت أحدث لقطة تالفة تُستعمل الأقدم، وإن تلفت كلها يبدأ الخادم بقاعدة جديدة بدل الانهيار.
     def test_newest_corrupt_falls_back_to_older(self):
         make_db(self.a / "store.db", orders=1, marker="old")
         p = make_persist(self.a, self.store.endpoint)
@@ -375,6 +415,7 @@ class SnapshotRestoreTests(StoreCase):
         self.assertFalse((self.b / "store.db").exists())
         self.assertFalse(q.blocked)
 
+    # قاعدة محلية فيها بيانات حقيقية لا تُستبدل أبداً بنسخة من المخزن (النتيجة local_kept).
     def test_non_empty_local_database_is_never_overwritten(self):
         make_db(self.a / "store.db", orders=2, marker="remote")
         make_persist(self.a, self.store.endpoint).snapshot()
@@ -400,6 +441,7 @@ class SnapshotRestoreTests(StoreCase):
         self.assertEqual(make_persist(self.b, self.store.endpoint).restore_on_startup(), "local_kept")
         self.assertEqual((self.b / "store.db").read_bytes(), b"not a database at all, keep me")
 
+    # قاعدة "البذرة" الأولية التي لم يعدّلها أحد تُستبدل بالنسخة البعيدة، أما بعد أي تعديل فتبقى المحلية.
     def test_pristine_seed_is_replaced_by_remote_snapshot(self):
         make_db(self.a / "store.db", orders=2, marker="remote")
         make_persist(self.a, self.store.endpoint).snapshot()
@@ -425,6 +467,8 @@ class SnapshotRestoreTests(StoreCase):
         conn.close()
         self.assertEqual(make_persist(self.b, self.store.endpoint).restore_on_startup(), "local_kept")
 
+    # أمان: أسماء كائنات خبيثة في المخزن (.. أو شرطة عكسية أو مسافات أو طول مبالغ) تُتجاهل فلا يُكتب شيء خارج
+    # مجلد uploads.
     def test_hostile_keys_are_ignored(self):
         make_db(self.a / "store.db", marker="ok")
         (self.a / "uploads").mkdir()
@@ -444,6 +488,7 @@ class SnapshotRestoreTests(StoreCase):
         self.assertFalse((self.tmp / "evil.txt").exists())
         self.assertFalse((self.b / "evil.txt").exists())
 
+    # إن تعذّر الوصول للمخزن عند الإقلاع يُحجب الرفع (blocked) كي لا تُكتب بذرة فارغة فوق النسخة الحقيقية، دون انهيار.
     def test_unreachable_bucket_blocks_uploads_and_never_crashes(self):
         dead = free_port()
         logs: list[str] = []
@@ -456,17 +501,20 @@ class SnapshotRestoreTests(StoreCase):
         self.assertFalse(p.flush(1))
         self.assertTrue(any("unreachable" in line for line in logs))
 
+    # حاوية فارغة تعني تشغيلاً أول مرة: لا نسخة بعيدة وليس هناك حجب.
     def test_empty_bucket_is_fresh_start_and_not_blocked(self):
         q = make_persist(self.b, self.store.endpoint)
         self.assertEqual(q.restore_on_startup(), "no_remote")
         self.assertFalse(q.blocked)
 
+    # خطأ مؤقت واحد (503) يُعاد المحاولة بعده وينجح الرفع.
     def test_transient_errors_are_retried(self):
         make_db(self.a / "store.db", marker="r")
         p = make_persist(self.a, self.store.endpoint)
         self.store.fail_next = 1
         self.assertTrue(p.snapshot())
 
+    # أمان: رسائل الخطأ والسجل لا تحوي مفتاح الوصول ولا المفتاح السري حتى لو أعادهما المخزن في ردّ الخطأ.
     def test_error_text_never_contains_secrets(self):
         make_db(self.a / "store.db", marker="r")
         logs: list[str] = []
@@ -481,6 +529,8 @@ class SnapshotRestoreTests(StoreCase):
         self.assertNotIn(FAKE_ACCESS, joined)
 
 
+# ---- وتيرة الحفظ ----
+# تغييرات مهمة (طلبات، منتجات) تُحفظ بالفاصل العادي، أما الزيارات وحدها فبفاصل أبطأ لتقليل الطلبات على المخزن.
 class CadenceTests(StoreCase):
     def test_analytics_only_is_slow_important_is_fast_and_flush_persists(self):
         make_db(self.a / "store.db", views=1, marker="c")
@@ -505,6 +555,7 @@ class CadenceTests(StoreCase):
             time.sleep(0.2)
         self.assertEqual(self.store.count("PUT", "alfakhama/db/"), 2)
 
+    # flush (عند الإيقاف) يرفع حتى الإحصاءات المعلّقة، وإن لم يوجد شيء متسخ لا يرفع شيئاً.
     def test_flush_uploads_pending_analytics(self):
         make_db(self.a / "store.db", views=7, marker="f")
         p = make_persist(self.a, self.store.endpoint, interval=1, analytics=600)
@@ -515,6 +566,7 @@ class CadenceTests(StoreCase):
         self.assertEqual(read_db(self.b / "store.db")[1], 7)
         self.assertFalse(make_persist(self.tmp, self.store.endpoint).flush(1), "لا شيء متسخ => لا رفع")
 
+    # flush لا يتجاوز مهلته حتى لو كان المخزن ميتاً، كي لا يتعطل إيقاف الخادم.
     def test_flush_respects_time_budget(self):
         make_db(self.a / "store.db", marker="slow")
         dead = make_persist(self.a, "http://127.0.0.1:%d" % free_port())
@@ -527,7 +579,9 @@ class CadenceTests(StoreCase):
 # ----------------------------------------------------------------------------------------------------------------
 # تشغيل الخادم الحقيقي كعملية فرعية على المخزن المزيّف
 # ----------------------------------------------------------------------------------------------------------------
+# ---- حالات حدّية أُضيفت بعد المراجعة ----
 class ReviewFixTests(StoreCase):
+    # إن كانت لقطة جارية (معلّقة في PUT) فإن flush ينتظر انتهاءها بدل أن يفترض أن لا شيء متبقٍّ.
     def test_flush_waits_for_in_flight_snapshot(self):
         make_db(self.a / "store.db", marker="v1")
         p = make_persist(self.a, self.store.endpoint)
@@ -543,6 +597,7 @@ class ReviewFixTests(StoreCase):
         self.assertGreaterEqual(time.monotonic() - started, 0.3, "flush انتظر اللقطة الجارية")
         self.assertIn("alfakhama/latest.json", self.store.keys())
 
+    # فشل رفع صورة واحدة لا يمنع رفع القاعدة، وتبقى الصورة معلّمة لإعادة المحاولة.
     def test_failing_image_does_not_block_database_snapshot(self):
         make_db(self.a / "store.db", marker="v1")
         p = make_persist(self.a, self.store.endpoint)
@@ -552,6 +607,7 @@ class ReviewFixTests(StoreCase):
         self.assertTrue([k for k in self.store.keys() if k.startswith("alfakhama/db/")])
         self.assertTrue(p._dirty_important, "الصورة المتخطاة تُعاد محاولتها")
 
+    # انقطاع التحميل يُعدّ "غير متاح" (يحجب الرفع) وليس "تالفاً"، حتى لا تُستبدل النسخة السليمة ببذرة فارغة.
     def test_truncated_download_is_unreachable_not_corrupt(self):
         make_db(self.a / "store.db", orders=2, marker="real")
         make_persist(self.a, self.store.endpoint).snapshot()
@@ -561,6 +617,7 @@ class ReviewFixTests(StoreCase):
         self.assertTrue(q.blocked, "لا نرفع بذرة فارغة فوق النسخة الحقيقية")
         self.assertFalse((self.b / "store.db").exists())
 
+    # إذا كتب خادمان معاً، تُحفظ لقطة الكاتب الآخر تحت conflicts/ بدل أن تُفقد.
     def test_overlapping_instance_snapshot_is_kept_in_conflicts(self):
         make_db(self.a / "store.db", orders=1, marker="base")
         make_persist(self.a, self.store.endpoint).snapshot()
@@ -575,6 +632,7 @@ class ReviewFixTests(StoreCase):
         self.assertTrue(new.snapshot())
         self.assertTrue([k for k in self.store.keys() if k.startswith("alfakhama/conflicts/")], "نسخة الكاتب الآخر محفوظة")
 
+    # سياسة الاحتفاظ الطبقية في select_keep: الأحدث كثيفاً ثم لقطات أقل كثافة للأقدم، والقديم جداً يُحذف.
     def test_tiered_retention(self):
         now = datetime(2026, 1, 20, 12, 0, 0, tzinfo=timezone.utc)
         def key(dt): return "db/" + dt.strftime("%Y%m%dT%H%M%SZ") + "-" + "0" * 16 + ".db.gz"
@@ -586,17 +644,20 @@ class ReviewFixTests(StoreCase):
         self.assertNotIn(key(now - timedelta(days=20, hours=1)), keep)
         self.assertLess(len(keep), 60)
 
+    # عناوين خاطئة (منفذ غير صالح أو IPv6 ناقص) تعطّل الميزة بدل أن تُسقط الخادم.
     def test_bad_endpoints_disable_instead_of_crashing(self):
         env = {"BACKUP_S3_BUCKET": BUCKET, "BACKUP_S3_ACCESS_KEY": FAKE_ACCESS, "BACKUP_S3_SECRET_KEY": FAKE_SECRET}
         for bad in ("https://host:abc", "https://host:99999", "https://[::1"):
             self.assertIsNone(persist.load_config({**env, "BACKUP_S3_ENDPOINT": bad}, log=lambda m: None), bad)
 
 
+# ---- اختبار شامل على خادم app.py الحقيقي ----
 class ServerPersistenceTests(ServerCase):
     """لقطة -> SIGTERM -> مسح DATA_DIR -> إقلاع جديد: كل شيء يعود، ومنه إحصاءات الزيارات."""
     store: FakeS3
 
     @classmethod
+    # نشغّل مخزناً مزيّفاً ثم الخادم موجَّهاً إليه، وفاصل النسخ ثانية واحدة لتسريع الاختبار.
     def setUpClass(cls):
         cls.store = FakeS3()
         cls.admin_password = "Test-only-password-not-real-1"
@@ -609,6 +670,7 @@ class ServerPersistenceTests(ServerCase):
         cls.stop_server()
         cls.store.close()
 
+    # يزور صفحة عامة n مرة بمتصفح وهمي (تُحتسب في إحصاءات الزيارات).
     def visit(self, path, referer=None, n=1):
         for _ in range(n):
             h = {"User-Agent": "Mozilla/5.0 (test browser)"}
@@ -616,6 +678,7 @@ class ServerPersistenceTests(ServerCase):
                 h["Referer"] = referer
             self.assertEqual(self.req("GET", path, headers=h)[0], 200, path)
 
+    # ينتظر (استطلاعاً كل 0.2 ثانية) حتى يتحقق الشرط أو تنتهي المهلة؛ لأن الرفع يتم في خيط خلفي.
     def wait_for(self, predicate, timeout=15):
         end = time.time() + timeout
         while time.time() < end:
@@ -624,6 +687,7 @@ class ServerPersistenceTests(ServerCase):
             time.sleep(0.2)
         return False
 
+    # يجمع حالة المتجر عبر واجهات المدير (منتجات، طلبات، رسائل، إعدادات، زيارات) لمقارنتها قبل المسح وبعده.
     def snapshot_of_state(self, cookie, csrf):
         kw = {"cookie": cookie, "csrf": csrf}
         dash = self.json("GET", "/api/admin/dashboard?range=30", **kw)[1]
@@ -639,6 +703,7 @@ class ServerPersistenceTests(ServerCase):
             "analytics": self.json("GET", "/api/admin/analytics?days=30", **kw)[1],
         }
 
+    # السيناريو: إنشاء بيانات، ثم إيقاف بـ SIGTERM، ثم مسح مجلد البيانات بالكامل، ثم إقلاع جديد، فيجب أن يعود كل شيء.
     def test_full_cycle_survives_wipe_including_visit_statistics(self):
         cookie, csrf = self.login()
         kw = {"cookie": cookie, "csrf": csrf}
@@ -702,6 +767,8 @@ class ServerPersistenceTests(ServerCase):
         self.assertNotIn("storage", self.json("GET", "/api/admin/dashboard", cookie=cookie, csrf=csrf)[1], "الشكل القديم دون تغيير")
 
 
+# ---- الإعدادات الافتراضية والصحة ----
+# SITE_READY_DEFAULT=1 يؤثر على قواعد البيانات الجديدة فقط ولا يطغى على قيمة حفظها المدير.
 class SiteReadyDefaultTests(ServerCase):
     ENV = {"SITE_READY_DEFAULT": "1"}
 
@@ -720,6 +787,8 @@ class NoDefaultTests(ServerCase):
         self.assertFalse(self.json("GET", "/api/store")[1]["site_ready"])
 
 
+# وضع التخزين يكون disk إن كان مجلد البيانات قرصاً مركّباً منفصلاً وإلا ephemeral (يُمسح عند إعادة التشغيل) مع
+# تحذير بالعربية.
 class HealthAndWarningTests(ServerCase):
     ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com"}
 
@@ -748,6 +817,7 @@ class LocalNoWarningTests(ServerCase):
         self.assertIn(storage["mode"], ("ephemeral", "disk"))
 
 
+# حتى بدون مخزن S3، إشارة SIGTERM تُنهي الخادم بسلام (رمز خروج 0).
 class SigtermWithoutStoreTests(ServerCase):
     def test_sigterm_still_exits_cleanly_when_disabled(self):
         self.proc.send_signal(signal.SIGTERM)
@@ -759,10 +829,12 @@ class SigtermWithoutStoreTests(ServerCase):
 # ----------------------------------------------------------------------------------------------------------------
 # اختيارية: مخزن S3 حقيقي المحاكاة (moto) إن توفر
 # ----------------------------------------------------------------------------------------------------------------
+# moto_server أداة اختيارية تحاكي S3 بدقة أعلى؛ إن لم توجد يُتخطى الاختبار التالي.
 MOTO = os.environ.get("MOTO_SERVER") or shutil.which("moto_server")
 
 
 @unittest.skipUnless(MOTO, "moto_server غير متوفر (اختياري)")
+# دورة حفظ واستعادة على moto مع 5 صور (أكثر من صفحة في القائمة) لاختبار الترقيم الحقيقي.
 class MotoEndToEndTests(unittest.TestCase):
     def test_roundtrip_against_moto(self):
         port = free_port()

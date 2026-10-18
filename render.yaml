@@ -3,13 +3,17 @@
 #   (أ) خطة مدفوعة + قرص: أضف قسم disk أدناه (يعمل على الخطط المدفوعة فقط، ولن ينجح النشر على المجانية معه).
 #   (ب) مجاني: خزّن اللقطات في مخزن خارجي (Cloudflare R2 مثلًا) بضبط متغيرات BACKUP_S3_* في لوحة Render.
 # الخطوات بالتفصيل في docs/handover/05-Deployment-Guide.md. لا تضع أي قيمة سرية في هذا الملف.
+# ---- تعريف خدمة الويب على Render (يُقرأ عند النشر كـ Blueprint) ----
 services:
   - type: web
     name: alfakhama
     runtime: docker
     plan: free   # غيّرها إلى starter عند اختيار الحل (أ) مع تفعيل قسم disk في الأسفل
     dockerfilePath: ./Dockerfile
+    # ---- متغيرات البيئة ----
+    # sync: false تعني أن القيمة تُدخل يدويًا في لوحة Render ولا تُخزَّن في هذا الملف (للأسرار).
     envVars:
+      # عنوان الموقع العام. TRUST_PROXY=1 لأن Render يضع وكيله أمام الخادم فنثق برؤوس X-Forwarded-*.
       - key: PUBLIC_BASE_URL
         value: https://alfakhama.onrender.com
       - key: TRUST_PROXY
@@ -18,6 +22,7 @@ services:
         value: 0.0.0.0
       - key: PORT
         value: "4173"
+      # اسم المدير؛ كلمة مروره تأتي من لوحة Render فقط (لا تُكتب هنا أبدًا).
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
@@ -42,10 +47,12 @@ services:
         sync: false
       - key: BACKUP_S3_PREFIX
         sync: false
+    # ---- القرص الدائم (اختياري) ----
     # الحل (أ): الأقراص تتطلب خطة مدفوعة (Starter فما فوق). أزل علامة # عن الأسطر التالية بعد ترقية الخطة
     # وغيّر plan: free (في الأعلى) إلى starter. على الخطة المجانية يفشل النشر إن وُجد قسم disk.
     # disk:
     #   name: store-data
     #   mountPath: /data
     #   sizeGB: 1
+    # Render يستدعي هذا المسار للتأكد أن الخدمة تعمل قبل توجيه الزوار إليها.
     healthCheckPath: /api/health

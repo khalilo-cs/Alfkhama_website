@@ -1,8 +1,12 @@
+# ---- التكامل المستمر (CI) على GitHub Actions ----
+# يشغَّل عند كل push وكل pull request، ويتحقق من سلامة الخادم وتطبيق أندرويد قبل الدمج.
 name: CI
 on:
   push:
   pull_request:
+# ---- المهام ----
 jobs:
+  # مهمة الخادم: تشغّل اختبارات بايثون (unittest) بمفسّر معزول -I.
   server:
     runs-on: ubuntu-latest
     steps:
@@ -11,6 +15,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: python3 -I -m unittest discover -s tests -v
+  # مهمة أندرويد: تشغّل اختبارات الوحدة وفحص lint للتطبيق، ولها مهلة 30 دقيقة كي لا تعلق للأبد.
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -27,6 +32,8 @@ jobs:
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
           "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0"
+      # يخبر Gradle بمكان Android SDK عبر ملف local.properties (الملف نفسه مستبعد من Git).
       - run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      # اختبارات الوحدة وفحص lint لنسخة debug داخل مجلد android.
       - run: ./gradlew :app:testDebugUnitTest :app:lintDebug
         working-directory: android
