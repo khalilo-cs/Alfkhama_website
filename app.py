@@ -38,6 +38,7 @@ sys.path.insert(0, str(BASE_DIR))  # sibling modules also when started with `pyt
 import legal  # noqa: E402
 import pages  # noqa: E402
 import seo  # noqa: E402
+import persist  # noqa: E402
 import totp  # noqa: E402
 
 VERSION = "2.0.0"
@@ -70,6 +71,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "store.db"
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}")
 ASSETS_DIR = BASE_DIR / "assets"
 ICONS_DIR = BASE_DIR / "icons"
 # Loopback by default; set HOST=0.0.0.0 only for LAN testing or inside a container behind a reverse proxy.
@@ -226,6 +228,45 @@ ORDER_STATUSES = {
 }
 
 
+# -- حفظ دائم خارج الحاوية (persist.py) --------------------------------------------------------------------------------
+# على خطة Render المجانية يُمسح القرص عند كل إيقاف؛ إن ضُبطت متغيرات BACKUP_S3_* نحفظ لقطات في مخزن S3 خاص ونستعيدها عند الإقلاع.
+# بدونها يكون الكائن معطّلًا (لا يفعل شيئًا) فلا يتغير سلوك الخادم.
+try:
+    PERSIST = persist.Persistence(persist.load_config(), DATA_DIR, DB_PATH, UPLOAD_DIR, UPLOAD_NAME_RE,
+                                  required_tables=REQUIRED_TABLES, default_settings=DEFAULT_SETTINGS)
+except Exception as _exc:  # خطأ في إعداد النسخ الخارجي لا يجوز أن يمنع الموقع من العمل: نعطّل الميزة ونكمل
+    print(f"[persist] النسخ الخارجي معطّل بسبب خطأ في الإعداد / disabled, bad config: {type(_exc).__name__}", flush=True)
+    PERSIST = persist.Persistence(None, DATA_DIR, DB_PATH, UPLOAD_DIR, UPLOAD_NAME_RE,
+                                  required_tables=REQUIRED_TABLES, default_settings=DEFAULT_SETTINGS)
+# SITE_READY_DEFAULT=1: قاعدة جديدة تماما تبدأ بالموقع "جاهز" (بلا شريط النسخة التجريبية). هذه قيمة افتراضية لقاعدة جديدة فقط
+# ولا تغيّر أبدًا قيمة حفظها المدير.
+SITE_READY_DEFAULT = os.environ.get("SITE_READY_DEFAULT", "") == "1"
+
+
+def persistence_mode() -> str:
+    """s3 = لقطات خارجية، disk = DATA_DIR على قرص دائم (جهاز مختلف عن /)، ephemeral = يُمسح مع الحاوية."""
+    if PERSIST.enabled:
+        return "s3"
+    try:
+        if os.path.ismount(DATA_DIR) or os.stat(DATA_DIR).st_dev != os.stat("/").st_dev:
+            return "disk"
+    except OSError:
+        pass
+    return "ephemeral"
+
+
+def storage_info() -> dict:
+    """لوحة الإدارة تعرضه: الوضع وآخر لقطة وتحذير عربي عند الخطر (قرص مؤقت أثناء التشغيل العام فقط)."""
+    mode = persistence_mode()
+    warning = ""
+    if mode == "ephemeral" and (TRUST_PROXY or PUBLIC_BASE_URL):
+        warning = "التخزين مؤقت: بياناتك وصورك وإحصاءات الزيارات تضيع عند كل إعادة تشغيل للخدمة. فعّل التخزين الدائم (راجع دليل النشر)."
+    if PERSIST.enabled and PERSIST.blocked:
+        # المخزن لم يكن متاحًا عند الإقلاع: لا يُحفظ شيء الآن، والمدير يجب أن يعرف.
+        warning = "النسخ الخارجي متوقف: تعذر الوصول إلى المخزن عند التشغيل فلا تُحفظ تغييراتك الآن. تحقق من إعدادات BACKUP_S3_* ثم أعد تشغيل الخدمة."
+    return {"mode": mode, "blocked": bool(PERSIST.enabled and PERSIST.blocked), "last_snapshot": PERSIST.last_snapshot, "warning": warning}
+
+
 class APIError(Exception):
     def __init__(self, message: str, status: int = 400, headers: dict | None = None, extra: dict | None = None):
         super().__init__(message)
@@ -236,7 +277,8 @@ class APIError(Exception):
 
 
 @contextmanager
-def connect_db():
+def connect_db(analytics_only: bool = False):
+    """analytics_only=True للكتابة في إحصاءات الزيارات فقط: تُحفظ خارجيًا بوتيرة أبطأ حتى لا يُغرق الزوار المخزن بالرفع."""
     conn = sqlite3.connect(DB_PATH, timeout=20)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -244,6 +286,9 @@ def connect_db():
     try:
         yield conn
         conn.commit()
+        # total_changes > 0 يعني أن صفوفًا تغيّرت فعلًا؛ نعلّم القاعدة "متسخة" ليأخذ خيط الحفظ لقطة جديدة.
+        if conn.total_changes:
+            PERSIST.mark_dirty(analytics_only)
     except Exception:
         conn.rollback()
         raise
@@ -281,6 +326,8 @@ def init_db() -> str | None:
     generated_password: str | None = None
     with connect_db() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
+        # قاعدة جديدة تماما = لا جدول settings بعد؛ فقط حينها نطبّق SITE_READY_DEFAULT.
+        fresh_db = not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'").fetchone()
         conn.executescript("""
           CREATE TABLE IF NOT EXISTS categories (
             slug TEXT PRIMARY KEY,
@@ -393,6 +440,8 @@ def init_db() -> str | None:
         for slug, name, order in CATEGORIES:
             conn.execute("INSERT OR IGNORE INTO categories(slug,name,sort_order,active) VALUES(?,?,?,1)", (slug, name, order))
         for key, value in DEFAULT_SETTINGS.items():
+            if key == "site_ready" and fresh_db and SITE_READY_DEFAULT:
+                value = "1"
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
         if not conn.execute("SELECT 1 FROM settings WHERE key='sample_cleanup_v1'").fetchone():
             for slug, (name, price) in LEGACY_SAMPLES.items():
@@ -509,7 +558,7 @@ def prune_analytics(conn: sqlite3.Connection, now: datetime | None = None) -> No
 def record_page_view(path: str, referrer: str | None) -> None:
     """Add one view of `path` to today's totals (UPSERT), and one entry for the referring host if there is one."""
     day = shop_today().isoformat()
-    with connect_db() as conn:
+    with connect_db(analytics_only=True) as conn:
         conn.execute("PRAGMA synchronous = NORMAL")  # WAL + NORMAL: a cheap commit; a power cut may lose the last few counts
         conn.execute("INSERT INTO page_views(day,path,views) VALUES(?,?,1) ON CONFLICT(day,path) DO UPDATE SET views=views+1",
                      (day, path[:300]))
@@ -702,6 +751,7 @@ def save_image_data(data_uri: str) -> str:
         raise APIError("محتوى الملف لا يطابق نوع الصورة.")
     filename = f"{uuid.uuid4().hex}.{ext}"
     (UPLOAD_DIR / filename).write_bytes(raw)
+    PERSIST.mark_dirty()  # صورة جديدة: تُرفع إلى المخزن الخارجي في الدورة القادمة
     return f"/uploads/{filename}"
 
 
@@ -1955,7 +2005,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                     if range_arg is not None:
                         if len(range_arg) != 1 or not re.fullmatch(r"\d{1,3}", range_arg[0]) or int(range_arg[0]) not in DASHBOARD_RANGES:
                             raise APIError("قيمة range يجب أن تكون 7 أو 30 أو 90.")
-                        self.send_json(dashboard_report(int(range_arg[0]))); return
+                        self.send_json({**dashboard_report(int(range_arg[0])), "storage": storage_info()}); return
                     with connect_db() as conn:
                         total_products = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
                         active_count = conn.execute("SELECT COUNT(*) FROM products WHERE active=1").fetchone()[0]
@@ -2088,7 +2138,6 @@ def backup_data(keep: int = 14) -> list[Path]:
     return [db_copy, tar_path]
 
 
-UPLOAD_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}")
 BACKUP_NAME_RE = re.compile(r"(?:store-\d{8}-\d{6}\.db|uploads-\d{8}-\d{6}\.tar\.gz|pre-restore-\d{8}-\d{6}\.zip)")
 
 
@@ -2436,7 +2485,11 @@ if __name__ == "__main__":
         sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "set-admin":
         sys.exit(run_set_admin())
+    # الاستعادة قبل init_db وقبل الاستماع: إن كانت الحاوية فارغة تُعاد البيانات من المخزن الخارجي.
+    # لا تُسجَّل هنا أي أسرار؛ الخادم يكمل بقاعدة جديدة إن فشلت الاستعادة.
+    PERSIST.restore_on_startup()
     first_run_password = init_db()
+    print(f"التخزين: {persistence_mode()}" + (f" (استعادة: {PERSIST.restore_status})" if PERSIST.enabled else "") + f" / persistence: {persistence_mode()}", flush=True)
     if ADMIN_SYNC_RESULT.get("status") == "updated":
         print(f"تمت مزامنة بيانات المدير من متغيرات البيئة — المستخدم: {ADMIN_SYNC_RESULT['username']}", flush=True)
     elif ADMIN_SYNC_RESULT.get("reason") in ("weak_password", "username_taken"):
@@ -2449,7 +2502,9 @@ if __name__ == "__main__":
     server.daemon_threads = True
     if AUTO_BACKUP:
         start_auto_backup(BACKUP_KEEP)
-    # SIGTERM (docker stop, systemd) finishes in-flight requests and exits cleanly.
+    PERSIST.start()
+    # SIGTERM (docker stop, Render) يوقف استقبال الطلبات؛ ثم يأخذ الخيط الرئيسي لقطة أخيرة (مهلة 20 ثانية) قبل الخروج.
+    # Render يقتل الحاوية بعد نحو 30 ثانية من SIGTERM، ولذلك لا نتجاوز 20.
     signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(f"\nموقع المتجر: http://{HOST}:{PORT}/")
     print(f"لوحة الإدارة: http://{HOST}:{PORT}/admin")
@@ -2466,3 +2521,7 @@ if __name__ == "__main__":
         pass
     finally:
         server.server_close()
+        try:
+            PERSIST.flush(20.0)
+        except Exception:
+            traceback.print_exc()

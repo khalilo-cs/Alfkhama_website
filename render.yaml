@@ -1,7 +1,13 @@
+# تنبيه مهم: خطة Render المجانية لا تدعم الأقراص (disk). قرص الحاوية فيها يُمسح عند كل إيقاف أو إعادة نشر،
+# فتعود القاعدة والصور والإعدادات إلى النسخة التجريبية. حلّان:
+#   (أ) خطة مدفوعة + قرص: أضف قسم disk أدناه (يعمل على الخطط المدفوعة فقط، ولن ينجح النشر على المجانية معه).
+#   (ب) مجاني: خزّن اللقطات في مخزن خارجي (Cloudflare R2 مثلًا) بضبط متغيرات BACKUP_S3_* في لوحة Render.
+# الخطوات بالتفصيل في docs/handover/05-Deployment-Guide.md. لا تضع أي قيمة سرية في هذا الملف.
 services:
   - type: web
     name: alfakhama
     runtime: docker
+    plan: free   # غيّرها إلى starter عند اختيار الحل (أ) مع تفعيل قسم disk في الأسفل
     dockerfilePath: ./Dockerfile
     envVars:
       - key: PUBLIC_BASE_URL
@@ -20,8 +26,26 @@ services:
         value: json
       - key: AUTO_BACKUP
         value: "1"
-    disk:
-      name: store-data
-      mountPath: /data
-      sizeGB: 1
+      # قاعدة جديدة (أو مستعادة من لا شيء) تبدأ بالموقع جاهزًا بلا شريط النسخة التجريبية. لا تغيّر قيمة حفظها المدير.
+      - key: SITE_READY_DEFAULT
+        value: "1"
+      # الحفظ الدائم المجاني: القيم تُدخل يدويًا في لوحة Render (sync: false = لا تُكتب هنا).
+      - key: BACKUP_S3_ENDPOINT
+        sync: false
+      - key: BACKUP_S3_BUCKET
+        sync: false
+      - key: BACKUP_S3_ACCESS_KEY
+        sync: false
+      - key: BACKUP_S3_SECRET_KEY
+        sync: false
+      - key: BACKUP_S3_REGION
+        sync: false
+      - key: BACKUP_S3_PREFIX
+        sync: false
+    # الحل (أ): الأقراص تتطلب خطة مدفوعة (Starter فما فوق). أزل علامة # عن الأسطر التالية بعد ترقية الخطة
+    # وغيّر plan: free (في الأعلى) إلى starter. على الخطة المجانية يفشل النشر إن وُجد قسم disk.
+    # disk:
+    #   name: store-data
+    #   mountPath: /data
+    #   sizeGB: 1
     healthCheckPath: /api/health

@@ -9,6 +9,15 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       PUBLIC_BASE_URL: https://${DOMAIN:?set DOMAIN to your domain name}
+      SITE_READY_DEFAULT: ${SITE_READY_DEFAULT:-1}
+      # اختياري: نسخ لقطات إلى مخزن S3 خاص (R2 / B2 / S3 / MinIO). فارغة = معطّل. ضعها في ملف .env لا في Git.
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-auto}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-alfakhama/}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-120}
     volumes:
       - store-data:/data        # database, uploads and daily backups (/data/backups)
   caddy:

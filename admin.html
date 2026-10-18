@@ -279,6 +279,7 @@
     /* analytics:end */
 
     /* dashboard:start — landing view: KPI cards with trends, charts (vendored Chart.js), bar lists, alerts and quick actions */
+    .storage-note{background:#fdf3e1;border:1px solid #d9b46a;color:#5a3d08;border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:12px;line-height:1.9}.storage-note b{display:block;color:#3f2a04;margin-bottom:2px}
     .dash-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
     .dash-tools{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
     .period-switch .btn{min-height:44px}
@@ -622,6 +623,8 @@
       dashCharts_(d,animate);
       const k=d.kpis||{};
       $('#pendingBadge').textContent=k.orders_new_pending;$('#pendingBadge').classList.toggle('hidden',!k.orders_new_pending);setMessagesBadge(k.messages_unread);
+      // تحذير التخزين المؤقت: يظهر فقط عندما يرسل الخادم storage.warning (نص عربي)؛ textContent يمنع أي حقن HTML.
+      const storageBox=$('#dashStorage');if(storageBox){storageBox.innerHTML='';const w=d.storage&&d.storage.warning;if(w){const n=document.createElement('div');n.className='storage-note';n.setAttribute('role','note');const t=document.createElement('b');t.textContent='تنبيه: بياناتك غير محفوظة بشكل دائم';const m=document.createElement('span');m.textContent=w+' الخطوات في دليل النشر: «لماذا يعود الموقع نسخة تجريبية؟ وكيف نحلّها».';n.append(t,m);storageBox.append(n)}}
       const alertBox=$('#dashAlert');if(alertBox){const n=Number(k.messages_unread)||0;alertBox.innerHTML='';if(n){const a=document.createElement('a');a.className='msg-alert';a.href='#messages/new';a.innerHTML=`<span class="stat-icon">${ICON.mail}</span><span class="msg-alert-copy"><b></b><small>استفسارات من نموذج التواصل في المتجر بانتظار ردّك.</small></span><span class="msg-alert-go" aria-hidden="true">←</span>`;a.querySelector('b').textContent=`لديك ${msgCountText(n)}`;alertBox.append(a)}}
       const stamp=$('#dashStamp');if(stamp)stamp.textContent='آخر تحديث: '+new Date(d.generated_at).toLocaleTimeString('ar-SA',{timeStyle:'short'});
       if(status&&opts.announce)status.textContent=`تم عرض مؤشرات ${dashPeriodName(d.range)}.`;
@@ -653,7 +656,7 @@
       $('#pageContent').innerHTML=`<div class="page-head"><div><h2>أهلًا ${esc(cur.name||'بك')}</h2><p>مؤشرات أداء المتجر والطلبات والزيارات. <span id="dashStamp" class="muted"></span></p></div><div class="page-actions"><button class="btn" data-go="products">${ICON.plus} إضافة منتج</button></div></div>
       <div class="dash-toolbar"><div class="period-switch" role="group" aria-label="الفترة الزمنية">${DASH_RANGES.map(n=>`<button type="button" class="btn secondary small-btn range-btn" data-range="${n}" aria-pressed="${n===dashRange}">${dashPeriodName(n)}</button>`).join('')}</div>
         <div class="dash-tools"><label class="auto-toggle"><input type="checkbox" id="dashAuto" role="switch"${dashAuto?' checked':''}> تحديث تلقائي كل دقيقة</label><button type="button" class="btn secondary small-btn" id="dashRefresh">تحديث الآن</button></div></div>
-      <p class="sr-only" id="dashStatus" role="status" aria-live="polite"></p><div id="dashAlert"></div><div id="dashBody" class="dash-body"></div>
+      <p class="sr-only" id="dashStatus" role="status" aria-live="polite"></p><div id="dashStorage"></div><div id="dashAlert"></div><div id="dashBody" class="dash-body"></div>
       <section class="panel dash-panel" aria-labelledby="dashQuickT"><div class="panel-head"><h3 id="dashQuickT">اختصارات الإدارة</h3></div><div class="panel-body"><div class="quick-links"><button class="quick-link" data-go="products"><span class="stat-icon">${ICON.box}</span><span><b>أضف منتجًا جديدًا</b><small>صورة، وصف، سعر ومخزون</small></span></button><button class="quick-link" data-go="orders"><span class="stat-icon">${ICON.orders}</span><span><b>تابع الطلبات</b><small>حدّث حالة الطلب وصدّرها</small></span></button><button class="quick-link" data-go="messages"><span class="stat-icon">${ICON.mail}</span><span><b>رسائل العملاء</b><small>استفسارات نموذج التواصل</small></span></button><button class="quick-link" data-go="settings"><span class="stat-icon">${ICON.edit}</span><span><b>بيانات المتجر</b><small>المدينة ووسائل التواصل</small></span></button></div></div></section>`;
       $$('#pageContent .page-head [data-go],#pageContent .quick-link').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.go)));
       $$('.range-btn').forEach(b=>b.addEventListener('click',()=>{const n=Number(b.dataset.range);if(n===dashRange)return;dashRange=n;$$('.range-btn').forEach(x=>x.setAttribute('aria-pressed',String(Number(x.dataset.range)===n)));history.replaceState(null,'','/admin/#overview/'+n);dashLoad({range:true,announce:true})}));
