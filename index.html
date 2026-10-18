@@ -760,10 +760,6 @@
   <a class="skip-link" href="#main">تخطي إلى المحتوى الرئيسي</a>
   <noscript><p class="noscript-note">السلة وإرسال الطلبات تحتاج إلى تفعيل JavaScript. يمكنك تصفّح <a href="/products">صفحة المنتجات</a> أو التواصل مع المتجر هاتفيًا.</p></noscript>
   <aside class="top-notices" aria-label="معلومات المتجر">
-  <div class="demo-ribbon" id="demoRibbon" role="note">
-    <span><i class="demo-dot" aria-hidden="true"></i>نسخة تجريبية — المنتجات والأسعار أمثلة؛ راجع معلومات المتجر قبل الإطلاق</span>
-    <a href="/admin/#settings" rel="nofollow">جهّز متجرك للنشر</a>
-  </div>
   <div class="announcement">
     <div class="container announcement-inner">
       <p id="announcementText">الفخامة للأقمشة والستائر — شارع المكرونة، مجمع الشرق، جدة.</p>
@@ -1262,7 +1258,6 @@ function applyStoreSettings(s){
   if(STORE.city)setText('#contactCopy',`نخدم عملاءنا في ${STORE.city}. تواصل للاستفسار عن الأقمشة والستائر والتفصيل حسب المقاس.`);
   if(STORE.hero_title)setText('#heroTitle',STORE.hero_title);if(STORE.hero_copy)setText('#heroCopy',STORE.hero_copy);
   // Title, description, canonical, Open Graph and JSON-LD are written by the server so crawlers and link previews see them.
-  const ribbon=$('#demoRibbon');if(ribbon)ribbon.hidden=Boolean(STORE.site_ready);
 }
 async function fetchJson(url,ms=15000){
   const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),ms);
