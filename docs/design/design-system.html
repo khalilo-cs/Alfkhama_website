@@ -126,9 +126,6 @@ a{color:var(--gold-ink)}
 .demo .counter{position:absolute;top:-1px;left:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--gold-grad);color:var(--night);font-weight:800;font-size:10px;line-height:18px;text-align:center;box-shadow:0 4px 10px -3px rgba(168,128,63,.7);font-style:normal}
 .demo .on-request{font-size:14px;font-weight:700;color:var(--ink)}
 .demo .toast{display:inline-block;background:var(--night);color:var(--ivory);border:1px solid rgba(234,214,166,.35);border-radius:999px;font-size:14px;padding:13px 20px;box-shadow:0 20px 50px -20px rgba(0,0,0,.6)}
-.demo .demo-ribbon{display:flex;justify-content:center;align-items:center;gap:10px;background:#efe5d1;color:#4f3a15;font-size:12px;padding:7px 18px;border-radius:12px;width:100%}
-.demo .demo-dot{width:6px;height:6px;border-radius:50%;background:var(--gold-3);display:inline-block}
-.demo .demo-ribbon a{font-weight:700;color:inherit}
 
 .demo .product-card{position:relative;background:var(--white);border-radius:26px;padding:10px;box-shadow:0 1px 0 rgba(21,19,15,.03),0 18px 40px -30px rgba(21,19,15,.45);transition:transform .5s var(--ease),box-shadow .5s var(--ease);max-width:290px}
 .demo .product-card:before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(135deg,rgba(234,214,166,.9),rgba(201,164,100,.05) 45%,rgba(201,164,100,.55));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transition:opacity .5s var(--ease);pointer-events:none}
@@ -283,7 +280,7 @@ a{color:var(--gold-ink)}
   <div class="ds-grid g3" data-swatches>
     <div class="swatch" data-hex="#c9a464" data-name="ذهبي" data-token="--gold" data-use="حدود التركيز في الحقول، الخطوط الزخرفية، حدود البطاقات عند المرور — ليس للنص على الفاتح"></div>
     <div class="swatch" data-hex="#ead6a6" data-name="ذهبي فاتح (شامبانيا)" data-token="--gold-2" data-use="نص العناوين الصغيرة والأيقونات على الداكن"></div>
-    <div class="swatch" data-hex="#a8803f" data-name="ذهبي داكن" data-token="--gold-3" data-use="نقطة شريط «نسخة تجريبية» ولون مربعات الاختيار"></div>
+    <div class="swatch" data-hex="#a8803f" data-name="ذهبي داكن" data-token="--gold-3" data-use="لون مربعات الاختيار والنقاط الصغيرة"></div>
     <div class="swatch" data-hex="#76561f" data-name="ذهبي الحبر" data-token="--gold-ink / --olive" data-use="أي نص أو رابط ذهبي على الخلفيات الفاتحة، وحلقة التركيز"></div>
     <div class="swatch" data-hex="#5a4116" data-name="ذهبي أعمق" data-token="--olive-dark" data-use="نص «السعر حسب الطلب» في القاعدة، عناوين فرعية"></div>
     <div class="swatch" data-hex="#b8894a" data-name="طيني" data-token="--clay" data-use="لمسات ثانوية"></div>
@@ -304,7 +301,6 @@ a{color:var(--gold-ink)}
     <div class="swatch" data-hex="#f6f1e7" data-name="خلفية الإدارة" data-token="--bg (admin)" data-use="خلفية لوحة الإدارة"></div>
     <div class="swatch" data-hex="#f3ead7" data-name="رقاقة" data-token="--sage (admin)" data-use="الرقائق وزر القائمة"></div>
     <div class="swatch" data-hex="#f6eedd" data-name="بطاقة تنبيه" data-token="notice-card" data-use="الملاحظات الأمنية والتنبيهات"></div>
-    <div class="swatch" data-hex="#efe5d1" data-name="شريط تجريبي" data-token="demo-ribbon" data-use="شريط «نسخة تجريبية» (النص #4f3a15)"></div>
   </div>
   <h3 class="ds-h3">التدرج الذهبي</h3>
   <div class="grad-bar" role="img" aria-label="التدرج الذهبي"></div>
@@ -327,7 +323,6 @@ a{color:var(--gold-ink)}
       <tr data-fg="#efe2c4" data-bg="#15130f"><td></td><td>شريط الإعلان أعلى المتجر</td></tr>
       <tr data-fg="#15130f" data-bg="#d3ad6b"><td></td><td>نص الزر الذهبي (منتصف التدرج)</td></tr>
       <tr data-fg="#15130f" data-bg="#b28642"><td></td><td>نص الزر الذهبي (أغمق نقطة)</td></tr>
-      <tr data-fg="#4f3a15" data-bg="#efe5d1"><td></td><td>شريط «نسخة تجريبية»</td></tr>
       <tr data-fg="#fdfaf4" data-bg="#1e1a15"><td></td><td>شريط الموافقة على ملفات التعريف</td></tr>
       <tr data-fg="#1b1915" data-bg="#f6f1e7"><td></td><td>نص لوحة الإدارة</td></tr>
       <tr data-fg="#4f4636" data-bg="#f6eedd"><td></td><td>بطاقات التنبيه في الإدارة</td></tr>
@@ -417,7 +412,6 @@ a{color:var(--gold-ink)}
     <div><span class="on-request">السعر حسب الطلب</span><span class="ds-label">on-request</span></div>
   </div>
   <div class="ds-panel light demo" style="margin-top:12px">
-    <div class="demo-ribbon" role="note"><span><i class="demo-dot" aria-hidden="true"></i> نسخة تجريبية — المنتجات والأسعار أمثلة؛ راجع معلومات المتجر قبل الإطلاق</span><a href="#chips">جهّز متجرك للنشر</a></div>
     <div><span class="toast" role="status">أُضيف ستائر ويفي — موديل 3 إلى السلة</span><span class="ds-label">toast (إشعار)</span></div>
   </div>
   <div class="ds-panel light admin" style="margin-top:12px">

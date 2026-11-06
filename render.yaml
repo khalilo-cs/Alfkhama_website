@@ -31,9 +31,6 @@ services:
         value: json
       - key: AUTO_BACKUP
         value: "1"
-      # قاعدة جديدة (أو مستعادة من لا شيء) تبدأ بالموقع جاهزًا بلا شريط النسخة التجريبية. لا تغيّر قيمة حفظها المدير.
-      - key: SITE_READY_DEFAULT
-        value: "1"
       # الحفظ الدائم المجاني: القيم تُدخل يدويًا في لوحة Render (sync: false = لا تُكتب هنا).
       - key: BACKUP_S3_ENDPOINT
         sync: false

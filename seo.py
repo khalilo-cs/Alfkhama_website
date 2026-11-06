@@ -142,21 +142,21 @@ def collection_schema(base: str, path: str, name: str, description: str, items: 
 
 
 # كيان المتجر نفسه لتضمينه داخل صفحات «من نحن» و«تواصل»؛ يُحذف @context لأنه مضمَّن في كائن أب يحمله.
-def _store_entity(settings: dict, base: str, ready: bool, image: str) -> dict:
-    entity = store_schema(settings, base, ready, image)
+def _store_entity(settings: dict, base: str, image: str) -> dict:
+    entity = store_schema(settings, base, image)
     entity.pop("@context", None)
     return entity
 
 
 # صفحات «من نحن» و«تواصل معنا» و«الأسئلة الشائعة»: كل منها يغلّف بيانات المتجر أو الأسئلة بنوع schema.org المناسب.
-def about_schema(base: str, settings: dict, ready: bool, image: str, name: str, description: str) -> dict:
+def about_schema(base: str, settings: dict, image: str, name: str, description: str) -> dict:
     return {"@context": "https://schema.org", "@type": "AboutPage", "name": name, "description": description,
-            "url": base + "/about", "inLanguage": "ar-SA", "mainEntity": _store_entity(settings, base, ready, image)}
+            "url": base + "/about", "inLanguage": "ar-SA", "mainEntity": _store_entity(settings, base, image)}
 
 
-def contact_schema(base: str, settings: dict, ready: bool, image: str, name: str, description: str) -> dict:
+def contact_schema(base: str, settings: dict, image: str, name: str, description: str) -> dict:
     return {"@context": "https://schema.org", "@type": "ContactPage", "name": name, "description": description,
-            "url": base + "/contact", "inLanguage": "ar-SA", "mainEntity": _store_entity(settings, base, ready, image)}
+            "url": base + "/contact", "inLanguage": "ar-SA", "mainEntity": _store_entity(settings, base, image)}
 
 
 def faq_schema(faq: list[tuple[str, str]]) -> dict:
@@ -164,8 +164,8 @@ def faq_schema(faq: list[tuple[str, str]]) -> dict:
             "mainEntity": [{"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": a}} for q, a in faq]}
 
 
-# بيانات المتجر المحلي. مع ready=False (غير منشور) نقتصر على الاسم والوصف، فلا نعلن الهاتف والعنوان قبل النشر.
-def store_schema(settings: dict, base: str, ready: bool, image: str) -> dict:
+# بيانات المتجر المحلي (Store/LocalBusiness) كما تراها محركات البحث: الاسم والوصف والهاتف والعنوان والخريطة.
+def store_schema(settings: dict, base: str, image: str) -> dict:
     schema: dict = {
         "@context": "https://schema.org",
         "@type": ["Store", "LocalBusiness"],
@@ -174,21 +174,20 @@ def store_schema(settings: dict, base: str, ready: bool, image: str) -> dict:
         "areaServed": {"@type": "Country", "name": "المملكة العربية السعودية"},
         "currenciesAccepted": "SAR",
     }
-    if ready:
-        schema["url"] = base + "/"
-        if image:
-            schema["image"] = absolute(base, image)
-        if settings.get("phone"):
-            schema["telephone"] = settings["phone"]
-        if settings.get("map_url"):
-            schema["hasMap"] = settings["map_url"]
-        if settings.get("address") or settings.get("city"):
-            schema["address"] = {"@type": "PostalAddress", "streetAddress": settings.get("address") or None,
-                                 "addressLocality": settings.get("city") or "جدة", "addressCountry": "SA"}
-            # حذف الحقول الفارغة من العنوان حتى لا يظهر None في JSON.
-            schema["address"] = {k: v for k, v in schema["address"].items() if v}
-        if settings.get("instagram"):
-            schema["sameAs"] = [settings["instagram"]]
+    schema["url"] = base + "/"
+    if image:
+        schema["image"] = absolute(base, image)
+    if settings.get("phone"):
+        schema["telephone"] = settings["phone"]
+    if settings.get("map_url"):
+        schema["hasMap"] = settings["map_url"]
+    if settings.get("address") or settings.get("city"):
+        schema["address"] = {"@type": "PostalAddress", "streetAddress": settings.get("address") or None,
+                             "addressLocality": settings.get("city") or "جدة", "addressCountry": "SA"}
+        # حذف الحقول الفارغة من العنوان حتى لا يظهر None في JSON.
+        schema["address"] = {k: v for k, v in schema["address"].items() if v}
+    if settings.get("instagram"):
+        schema["sameAs"] = [settings["instagram"]]
     return schema
 
 
@@ -307,8 +306,6 @@ def sitemap_xml(base: str, products: list[dict], extra_pages: list[str], main_pa
             + "".join(urls) + "</urlset>")
 
 
-# إذا لم يُنشر المتجر بعد نمنع الزحف كليًا؛ وإلا نسمح بكل شيء عدا /admin و /api/ ونشير إلى الخريطة.
-def robots_txt(base: str, ready: bool) -> str:
-    if not ready:
-        return "User-agent: *\nDisallow: /\n"
+# الموقع متاح دائمًا لمحركات البحث: نسمح بكل شيء عدا /admin و /api/ ونشير إلى خريطة الموقع.
+def robots_txt(base: str) -> str:
     return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\nSitemap: {base}/sitemap.xml\n"

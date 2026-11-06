@@ -56,10 +56,10 @@
     img{display:block;max-width:100%}
     .container{width:min(var(--max),calc(100% - 48px));margin-inline:auto}
     /* ---- 2) الشريط العلوي (الإعلان) والترويسة: الشعار والقائمة والبحث وأزرار الأيقونات ---- */
-    .demo-ribbon{display:flex;justify-content:center;align-items:center;gap:10px;background:#eee8db;color:#635a4d;padding:7px 18px;font-size:11px;letter-spacing:.01em;text-align:center}
-    .demo-ribbon span{display:inline-flex;align-items:center;gap:7px}
-    .demo-dot{width:6px;height:6px;border-radius:50%;background:var(--clay);display:inline-block}
-    .demo-ribbon a{font-weight:700;text-decoration:underline;text-underline-offset:3px}
+    
+    
+    
+    
     .announcement{background:var(--olive);color:#fff;padding:8px 0;font-size:11px;letter-spacing:.02em}
     .announcement-inner{display:flex;align-items:center;justify-content:space-between;gap:16px}
     .announcement p{margin:0;opacity:.94}
@@ -266,7 +266,7 @@
       .footer-top{grid-template-columns:1fr 1fr;gap:28px}
     }
     @media (max-width:600px){
-      .container{width:calc(100% - 30px)}.demo-ribbon{font-size:9px;padding:7px 9px;gap:5px}.demo-ribbon a{display:none}
+      .container{width:calc(100% - 30px)}
       .announcement{font-size:9px}.announcement-inner{justify-content:center}.announcement-links{display:none}
       .header-inner{min-height:66px}.brand-mark{width:35px;height:35px;border-radius:11px}.brand-mark svg{width:22px}.brand-name{font-size:19px}.brand-tagline{font-size:8px}.header-actions{gap:0}.icon-btn{width:34px;height:36px}.icon-btn svg{width:18px;height:18px}
       .hero{min-height:540px;align-items:flex-end;background-position:39% center;background-image:linear-gradient(to top,rgba(248,246,240,.98) 0%,rgba(248,246,240,.94) 32%,rgba(248,246,240,.58) 54%,rgba(248,246,240,.04) 77%),url('/assets/wavy-11.jpg')}
@@ -304,7 +304,7 @@
     /* حدٌّ أدنى لحجم الخط على الهاتف: كل القواعد التالية ترفع أحجام الخطوط الصغيرة حتى تبقى مقروءة. */
     /* readability-floor:start — phone screens: text is never smaller than 11px (labels) / 12px (copy) / 13px (names, prices) */
     @media (max-width:600px){
-      .demo-ribbon{font-size:12px}
+      
       .announcement{font-size:12px}
       .brand-tagline{font-size:11px}
       .header-search input{font-size:13px}
@@ -391,8 +391,8 @@
     .on-dark :where(a,button,input,select,textarea,summary,[tabindex]):focus-visible,.hero :focus-visible,.site-footer :focus-visible,.announcement :focus-visible{outline-color:var(--gold-2);box-shadow:0 0 0 6px rgba(21,19,15,.6)}
 
     /* top bars + header */
-    .demo-ribbon{background:#efe5d1;color:#4f3a15;font-size:12px}
-    .demo-dot{background:var(--gold-3);box-shadow:0 0 0 0 rgba(168,128,63,.6);animation:pulse-dot 2.4s infinite}
+    
+    
     .announcement{background:var(--night);color:#efe2c4;font-size:12px;border-bottom:1px solid rgba(234,214,166,.14)}
     .announcement-links a{color:var(--gold-2)}
     .site-header{background:rgba(253,250,244,.78);backdrop-filter:saturate(1.5) blur(20px);-webkit-backdrop-filter:saturate(1.5) blur(20px);border-bottom:1px solid rgba(201,164,100,.18);transition:box-shadow .4s var(--ease),background .4s}
@@ -711,12 +711,12 @@
     .sort-select{min-height:44px}
     .quick-add{min-height:44px}
     .favorite-btn{width:40px;height:40px}
-    .favorite-btn:after,.qty-control button:after,.text-link:after,.announcement-links a:after,.demo-ribbon a:after{content:"";position:absolute}
+    .favorite-btn:after,.qty-control button:after,.text-link:after,.announcement-links a:after{content:"";position:absolute}
     .favorite-btn:after{inset:-2px;border-radius:50%}
     .qty-control button{position:relative;width:32px;height:32px}.qty-control button:after{inset:-6px}
     .remove-line{min-width:44px;min-height:44px}
     .text-link{position:relative}.text-link:after{inset:-10px -4px}
-    .announcement-links a,.demo-ribbon a{position:relative}.announcement-links a:after,.demo-ribbon a:after{inset:-12px -6px}
+    .announcement-links a{position:relative}.announcement-links a:after{inset:-12px -6px}
     .footer-links{gap:0}
     .footer-dyn{display:contents}
     .footer-links a{display:flex;align-items:center;min-height:44px}
@@ -1013,7 +1013,7 @@
 // ---- 1) الحالة العامة: إعدادات المتجر والمنتجات والأقسام ----
 // STORE قيم افتراضية تُدمج فوقها إعدادات /api/store في applyStoreSettings؛ catalogState يمنع عرض منتجات أو
 // أسعار مختلقة.
-let STORE = {name:'الفخامة للأقمشة والستائر',tagline:'تفصيل ستائر وأقمشة في جدة',city:'جدة',phone:'+966 57 648 6491',whatsapp:'',address:'شارع المكرونة، مجمع الشرق، حي مشرفة، جدة 23444',map_url:'https://maps.app.goo.gl/kn2kxuPujQT9raLG7?g_st=awb',country:'المملكة العربية السعودية',delivery_fee:0,delivery_note:'تفصيل الستائر حسب المقاس؛ تواصل مع المتجر لتأكيد التوصيل والتركيب بحسب موقعك.',site_ready:false,seo_title:'الفخامة للأقمشة والستائر | تفصيل ستائر في جدة',seo_description:'الفخامة للأقمشة والستائر في جدة: تفصيل ستائر، ستائر رول وشرائح معدنية وكهربائية، وأقمشة متنوعة. زورونا في شارع المكرونة، مجمع الشرق، حي مشرفة.',hero_title:'ستائر تكمّل أناقة بيتك.',hero_copy:'من الأقمشة إلى الستائر المفصّلة، اختَر ما يناسب نافذتك وذوقك. تفصيل ستائر، رول، شرائح معدنية وكهربائية في جدة.'};
+let STORE = {name:'الفخامة للأقمشة والستائر',tagline:'تفصيل ستائر وأقمشة في جدة',city:'جدة',phone:'+966 57 648 6491',whatsapp:'',address:'شارع المكرونة، مجمع الشرق، حي مشرفة، جدة 23444',map_url:'https://maps.app.goo.gl/kn2kxuPujQT9raLG7?g_st=awb',country:'المملكة العربية السعودية',delivery_fee:0,delivery_note:'تفصيل الستائر حسب المقاس؛ تواصل مع المتجر لتأكيد التوصيل والتركيب بحسب موقعك.',seo_title:'الفخامة للأقمشة والستائر | تفصيل ستائر في جدة',seo_description:'الفخامة للأقمشة والستائر في جدة: تفصيل ستائر، ستائر رول وشرائح معدنية وكهربائية، وأقمشة متنوعة. زورونا في شارع المكرونة، مجمع الشرق، حي مشرفة.',hero_title:'ستائر تكمّل أناقة بيتك.',hero_copy:'من الأقمشة إلى الستائر المفصّلة، اختَر ما يناسب نافذتك وذوقك. تفصيل ستائر، رول، شرائح معدنية وكهربائية في جدة.'};
 let PRODUCTS = [], catalogState = 'loading'; // 'loading' | 'ready' | 'error' — never show invented products or prices
 let CATEGORIES = [{slug:'curtains',name:'ستائر تفصيل'},{slug:'roller',name:'ستائر رول'},{slug:'blinds',name:'ستائر شرائح معدنية'},{slug:'electric',name:'ستائر كهربائية'},{slug:'fabrics',name:'أقمشة الستائر'}];
 // أيقونات SVG جاهزة تُدرج في القوالب النصية (ثابتة وليست من مدخلات المستخدم).

@@ -72,7 +72,7 @@
 
 | الجدول | الحقول الرئيسية | ملاحظات |
 |---|---|---|
-| `settings` | `key` (مفتاح أساسي)، `value` | بيانات المتجر والواجهة وSEO و`site_ready` وصفحة «من نحن» (`about_title`، `about_body`، `opening_hours`) وGoogle (`ga4_id`، `google_site_verification`)، ومفاتيح داخلية لتنفيذ التهيئة مرة واحدة |
+| `settings` | `key` (مفتاح أساسي)، `value` | بيانات المتجر والواجهة وSEO وصفحة «من نحن» (`about_title`، `about_body`، `opening_hours`) وGoogle (`ga4_id`، `google_site_verification`)، ومفاتيح داخلية لتنفيذ التهيئة مرة واحدة |
 | `admins` | `username`، `password_hash`، `totp_secret`، `updated_at` | PBKDF2-SHA256 بـ 310,000 تكرار وملح عشوائي 16 بايت؛ `totp_secret` فارغ = التحقق بخطوتين غير مفعّل |
 | `categories` | `slug` (مفتاح أساسي)، `name`، `sort_order`، `active`، `image`، `description` | خمسة أقسام افتراضية: `curtains`، `roller`، `blinds`، `electric`، `fabrics` |
 | `products` | `id`، `name`، `slug` (فريد)، `category` ← `categories.slug`، `description`، `price`، `image`، `alt`، `badge`، `sku`، `stock`، `featured`، `active`، `created_at`، `updated_at` | `price = 0` تعني «السعر حسب الطلب»؛ `image` نسخة من الصورة الرئيسية |
@@ -108,7 +108,6 @@
 | `BACKUP_S3_ENDPOINT` / `BACKUP_S3_BUCKET` / `BACKUP_S3_ACCESS_KEY` / `BACKUP_S3_SECRET_KEY` | — | الحفظ الخارجي (يُفعَّل فقط إن ضُبطت الأربعة). العنوان `https://` (و`http://` لـ localhost فقط للاختبار)، بنمط path-style. السلة يجب أن تكون **خاصة** والمفتاح مقيّدًا بها، لأن اللقطات تحوي بيانات العملاء وبصمة كلمة مرور المدير |
 | `BACKUP_S3_REGION` / `BACKUP_S3_PREFIX` | `auto` / `alfakhama/` | منطقة التوقيع وبادئة المفاتيح داخل السلة |
 | `BACKUP_INTERVAL` / `BACKUP_ANALYTICS_INTERVAL` | `120` / `600` | ثوانٍ بين لقطتين عند تغيير مهم، وأدنى فاصل عندما يكون التغيير إحصاءات زيارات فقط (الفعلي `max` للرقمين) |
-| `SITE_READY_DEFAULT` | — | `1`: القاعدة **الجديدة** (أو المستعادة من لا شيء) تبدأ بـ `site_ready=1`. قيمة افتراضية فقط ولا تُلغي ما حفظه المدير |
 | `DOMAIN` (لـ `docker compose`) | — (إلزامي) | نطاق المتجر لـ Caddy و`PUBLIC_BASE_URL` |
 
 > ملف `.env` للتشغيل المحلي خارج Git وخارج صورة Docker وخارج هذه الحزمة. كلمة المرور المحلية لمرحلة التصميم فيه يجب ألا تُستخدم في الإنتاج أبدًا.
@@ -144,7 +143,7 @@ python3 app.py restore backup.zip [--force]  # استعادة نسخة ZIP من 
 
 ## الأداء
 
-قياسات فعلية من `docs/QUALITY.md` (Chromium، خادم محلي، 2026-10-08، بعد تفعيل الجاهزية للنشر):
+قياسات فعلية من `docs/QUALITY.md` (Chromium، خادم محلي، 2026-10-08):
 
 | الصفحة | الجهاز | الأداء | الوصول | أفضل الممارسات | SEO | LCP | CLS |
 |---|---|---|---|---|---|---|---|
@@ -165,7 +164,7 @@ python3 app.py restore backup.zip [--force]  # استعادة نسخة ZIP من 
 - لكل صفحة عنوان ووصف وcanonical وhreflang وOpen Graph وTwitter Card تُكتب في الخادم، فتقرؤها الزواحف ومعاينات واتساب دون JavaScript.
 - بيانات منظمة JSON-LD: `Store`/`LocalBusiness` و`WebSite` في الرئيسية، و`BreadcrumbList` لكل صفحة، و`CollectionPage`/`ItemList` للمنتجات والأقسام، و`AboutPage` و`ContactPage` و`FAQPage`. عنصر `Product` (مع `Offer`) يُنشر للمنتجات ذات السعر فقط؛ منتجات «السعر حسب الطلب» تأخذ `BreadcrumbList` وحده لأن Google لا يقبل منتجًا بلا عرض سعر.
 - `sitemap.xml` بالرئيسية وصفحات المتجر والقانونية والأقسام والمنتجات مع صورها، و`robots.txt` يمنع `/admin` و`/api/`.
-- **بوابة الجاهزية:** حتى تفعيل `site_ready` تكون كل الصفحات `noindex` ويمنع `robots.txt` كل شيء وتعطي `sitemap.xml` الرمز 404.
+- **الفهرسة:** الموقع مفتوح دائمًا لمحركات البحث: `robots.txt` يسمح بالزحف (عدا `/admin` و`/api/`) ويشير إلى `sitemap.xml` المتاح دائمًا، والصفحات `index,follow` عدا نتائج البحث وصفحات الأخطاء ونحوها فهي `noindex`. أُزيل خيار «الجاهزية للنشر» (`site_ready`)، وقد تحتوي قواعد قديمة على صف متبقٍّ يتجاهله الخادم.
 - المسار بشرطة مائلة في آخره (`/about/`) يُحوَّل `301` إلى المسار الرسمي؛ صفحة 404 بهوية المتجر وحالة 404 و`noindex`؛ نتائج البحث (`?q=`) والقسم الفارغ `noindex`.
 
 ## الحفظ الدائم (persist.py)

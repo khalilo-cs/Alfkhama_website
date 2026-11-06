@@ -241,27 +241,20 @@ class PublicAndStaticTests(ServerCase):
         self.assertRegex(src, r"request\.method\s*!==\s*['\"]GET['\"]")
         self.assertNotIn("localStorage", src)
 
-    # robots/sitemap يتبعان إعداد site_ready: قبل اعتماد المتجر يُمنع الفهرس (404 لـ sitemap)، وبعده يُسمح.
-    # ويُتحقق أيضًا أن ترويسة Host الخبيثة لا تنعكس داخل الملفات.
-    def test_robots_and_sitemap_follow_site_ready(self):
-        _, _, robots = self.req("GET", "/robots.txt")
-        self.assertIn(b"Disallow: /\n", robots)
-        self.assertEqual(self.req("GET", "/sitemap.xml")[0], 404)
-        cookie, csrf = self.login()
-        status, data, _ = self.json("PUT", "/api/admin/settings", {"site_ready": True}, cookie=cookie, csrf=csrf)
-        self.assertEqual(status, 200, data)
-        try:
-            _, _, robots = self.req("GET", "/robots.txt", headers={"Host": "shop.example.com"})
-            self.assertIn(b"Allow: /", robots)
-            self.assertIn(b"Sitemap: http://shop.example.com/sitemap.xml", robots)
-            status, _, sitemap = self.req("GET", "/sitemap.xml", headers={"Host": "shop.example.com"})
-            self.assertEqual(status, 200)
-            self.assertIn(b"<loc>http://shop.example.com/</loc>", sitemap)
-            # A hostile Host header must not be reflected into the sitemap.
-            _, _, robots = self.req("GET", "/robots.txt", headers={"Host": "evil.com/<script>"})
-            self.assertNotIn(b"evil.com", robots)
-        finally:
-            self.json("PUT", "/api/admin/settings", {"site_ready": False}, cookie=cookie, csrf=csrf)
+    # robots/sitemap متاحان دائمًا لمحركات البحث (لا توجد حالة "غير منشور")؛ ويُتحقق أيضًا أن ترويسة Host الخبيثة
+    # لا تنعكس داخل الملفات.
+    def test_robots_and_sitemap_are_always_open_to_search_engines(self):
+        _, _, robots = self.req("GET", "/robots.txt", headers={"Host": "shop.example.com"})
+        self.assertIn(b"Allow: /", robots)
+        self.assertNotIn(b"Disallow: /\n", robots)
+        self.assertIn(b"Disallow: /admin", robots)
+        self.assertIn(b"Sitemap: http://shop.example.com/sitemap.xml", robots)
+        status, _, sitemap = self.req("GET", "/sitemap.xml", headers={"Host": "shop.example.com"})
+        self.assertEqual(status, 200)
+        self.assertIn(b"<loc>http://shop.example.com/</loc>", sitemap)
+        # A hostile Host header must not be reflected into the sitemap.
+        _, _, robots = self.req("GET", "/robots.txt", headers={"Host": "evil.com/<script>"})
+        self.assertNotIn(b"evil.com", robots)
 
 
 # ---- لوحة الإدارة: تسجيل الدخول والجلسة وCSRF والمنتجات والأقسام والإعدادات وتغيير كلمة المرور ----
@@ -592,8 +585,6 @@ class ProxyModeTests(ServerCase):
 
     # PUBLIC_BASE_URL يحدد رابط sitemap في robots.txt ويتجاهل ترويسة Host المرسلة من المهاجم.
     def test_public_base_url_used_for_robots(self):
-        cookie, csrf = self.login()
-        self.json("PUT", "/api/admin/settings", {"site_ready": True}, cookie=cookie, csrf=csrf)
         _, _, robots = self.req("GET", "/robots.txt", headers={"Host": "attacker.test"})
         self.assertIn(b"Sitemap: https://shop.example.com/sitemap.xml", robots)
 
@@ -958,7 +949,7 @@ class StandardsTests(ServerCase):
         self.assertIn('property="og:type" content="product"', page)
         self.assertIn('property="og:image" content="http://shop.example.org/assets/wavy-03.jpg"', page)
         self.assertIn('name="twitter:card"', page)
-        self.assertIn('content="noindex,nofollow"', page, "stays noindex until the owner marks the store ready")
+        self.assertIn('content="index,follow,max-image-preview:large"', page, "product pages are always indexable")
         blocks = [json.loads(b) for b in re.findall(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', page, re.S)]
         types = [b["@type"] for b in blocks]
         # price on request: no invented price, and no Product item without an Offer (Google rejects it as invalid)
@@ -979,31 +970,24 @@ class StandardsTests(ServerCase):
         self.assertNotIn("<b>x</b>", body.decode(), "descriptions are escaped in meta tags")
         self.json("DELETE", f"/api/admin/products/{made['product']['id']}", **kw)
 
-    # sitemap يعرض المنتجات والأقسام التي فيها منتجات فقط، وعلى صفحات المتجر وسوم canonical وhreflang بعد
-    # اعتماد المتجر.
-    def test_sitemap_lists_products_only_when_ready(self):
-        cookie, csrf = self.login()
-        kw = dict(cookie=cookie, csrf=csrf)
-        self.json("PUT", "/api/admin/settings", {"site_ready": True}, **kw)
-        try:
-            status, resp, body = self.req("GET", "/sitemap.xml", headers={"Host": "shop.example.org"})
-            self.assertEqual(status, 200)
-            text = body.decode()
-            # home + 5 store pages + 2 legal pages + 1 category with products + 18 products
-            self.assertEqual(text.count("<url>"), 1 + 5 + 2 + 1 + 18)
-            self.assertIn("<loc>http://shop.example.org/product/wavy-01</loc>", text)
-            for page in ("/products", "/categories", "/about", "/contact", "/faq", "/category/curtains"):
-                self.assertIn(f"<loc>http://shop.example.org{page}</loc>", text)
-            self.assertNotIn("/category/fabrics", text, "a category without products is not listed")
-            self.assertIn("<image:loc>http://shop.example.org/assets/wavy-01.jpg</image:loc>", text)
-            self.assertIn("/privacy", text)
-            _, _, page = self.req("GET", "/", headers={"Host": "shop.example.org"})
-            self.assertIn(b'rel="canonical" href="http://shop.example.org/"', page)
-            self.assertIn(b'content="index,follow,max-image-preview:large"', page)
-            self.assertIn(b'hreflang="ar-SA"', page)
-            self.assertIn(b'rel="preload" as="image"', page)
-        finally:
-            self.json("PUT", "/api/admin/settings", {"site_ready": False}, **kw)
+    # sitemap يعرض المنتجات والأقسام التي فيها منتجات فقط، وعلى صفحات المتجر وسوم canonical وhreflang.
+    def test_sitemap_lists_products_and_categories(self):
+        status, resp, body = self.req("GET", "/sitemap.xml", headers={"Host": "shop.example.org"})
+        self.assertEqual(status, 200)
+        text = body.decode()
+        # home + 5 store pages + 2 legal pages + 1 category with products + 18 products
+        self.assertEqual(text.count("<url>"), 1 + 5 + 2 + 1 + 18)
+        self.assertIn("<loc>http://shop.example.org/product/wavy-01</loc>", text)
+        for page in ("/products", "/categories", "/about", "/contact", "/faq", "/category/curtains"):
+            self.assertIn(f"<loc>http://shop.example.org{page}</loc>", text)
+        self.assertNotIn("/category/fabrics", text, "a category without products is not listed")
+        self.assertIn("<image:loc>http://shop.example.org/assets/wavy-01.jpg</image:loc>", text)
+        self.assertIn("/privacy", text)
+        _, _, page = self.req("GET", "/", headers={"Host": "shop.example.org"})
+        self.assertIn(b'rel="canonical" href="http://shop.example.org/"', page)
+        self.assertIn(b'content="index,follow,max-image-preview:large"', page)
+        self.assertIn(b'hreflang="ar-SA"', page)
+        self.assertIn(b'rel="preload" as="image"', page)
 
     # صفحتا الخصوصية والشروط تأخذان بيانات التواصل من إعدادات المتجر.
     def test_legal_pages(self):
@@ -1228,7 +1212,7 @@ class StorePagesTests(ServerCase):
             _, _, html = self.page(path, headers={"Host": "shop.example.org"})
             blocks = ld_blocks(html)
             self.assertEqual({ld_type(b) for b in blocks}, types, path)
-            self.assertIn('content="noindex,nofollow"', html, "noindex until the owner marks the store ready")
+            self.assertIn('content="index,follow,max-image-preview:large"', html, "store pages are always indexable")
             self.assertIn(f'property="og:url" content="http://shop.example.org{path}"', html)
             self.assertRegex(html, r"<title>[^<]+ \| الفخامة للأقمشة والستائر</title>")
         _, _, html = self.page("/product/wavy-03", headers={"Host": "shop.example.org"})
@@ -1244,21 +1228,16 @@ class StorePagesTests(ServerCase):
         sys.path.insert(0, str(ROOT))
         import pages
         self.assertEqual([(q["name"], q["acceptedAnswer"]["text"]) for q in faq["mainEntity"]], pages.FAQ)
-        # once ready: indexable, canonical, and a search result page stays out of the index
-        cookie, csrf = self.login()
-        self.json("PUT", "/api/admin/settings", {"site_ready": True}, cookie=cookie, csrf=csrf)
-        try:
-            _, _, html = self.page("/about", headers={"Host": "shop.example.org"})
-            self.assertIn('rel="canonical" href="http://shop.example.org/about"', html)
-            self.assertIn('content="index,follow,max-image-preview:large"', html)
-            _, _, html = self.page("/products?q=" + quote_url("موديل"))
-            self.assertIn('content="noindex,nofollow"', html)
-            status, _, html = self.page("/no-such-page")
-            self.assertEqual(status, 404)
-            self.assertIn('content="noindex,nofollow"', html)
-            self.assertNotIn('rel="canonical"', html, "noindex pages carry no (empty) canonical link")
-        finally:
-            self.json("PUT", "/api/admin/settings", {"site_ready": False}, cookie=cookie, csrf=csrf)
+        # indexable with a canonical link; a search result page and unknown pages stay out of the index
+        _, _, html = self.page("/about", headers={"Host": "shop.example.org"})
+        self.assertIn('rel="canonical" href="http://shop.example.org/about"', html)
+        self.assertIn('content="index,follow,max-image-preview:large"', html)
+        _, _, html = self.page("/products?q=" + quote_url("موديل"))
+        self.assertIn('content="noindex,nofollow"', html)
+        status, _, html = self.page("/no-such-page")
+        self.assertEqual(status, 404)
+        self.assertIn('content="noindex,nofollow"', html)
+        self.assertNotIn('rel="canonical"', html, "noindex pages carry no (empty) canonical link")
 
     # صفحة المنتجات تعرض الكتالوج من الخادم؛ والبحث ?q= يفلتر الشبكة ويُهرَّب الإدخال الخبيث.
     def test_products_page_server_renders_the_catalogue(self):
@@ -1898,10 +1877,15 @@ class ReviewFixTests(ServerCase):
 
     # الصفحات المفهرسة بـ noindex لا تحمل canonical ولا og:url فارغًا.
     def test_noindex_pages_have_no_empty_canonical_or_og_url(self):
-        for path in ("/products", "/about", "/no-such-page", "/products?q=x"):
+        # صفحات noindex الحقيقية (غير موجودة، ونتائج البحث): لا canonical ولا og:url فارغ.
+        for path in ("/no-such-page", "/products?q=x"):
             html = self.req("GET", path)[2].decode()
             self.assertNotIn('rel="canonical"', html, path)
             self.assertNotIn('og:url" content=""', html, path)
+        # الصفحات العادية قابلة للفهرسة: canonical صحيح غير فارغ.
+        for path in ("/products", "/about"):
+            html = self.req("GET", path, headers={"Host": "shop.example.org"})[2].decode()
+            self.assertIn(f'rel="canonical" href="http://shop.example.org{path}"', html, path)
 
     # قواعد العدد العربية (المثنى، الجمع 3-10، التمييز المفرد بعد 10) تطابق الرقم.
     def test_arabic_counts_agree_with_the_number(self):
@@ -1936,7 +1920,7 @@ class ReviewFixTests(ServerCase):
     def test_store_schema_has_no_inlanguage_and_item_list_count_matches(self):
         sys.path.insert(0, str(ROOT))
         import seo
-        store = seo.store_schema({"store_name": "x"}, "https://shop.example", True, "")
+        store = seo.store_schema({"store_name": "x"}, "https://shop.example", "")
         self.assertNotIn("inLanguage", store)
         listing = seo.collection_schema("https://shop.example", "/products", "n", "d", [(f"p{i}", f"/product/p{i}") for i in range(150)])["mainEntity"]
         self.assertEqual(listing["numberOfItems"], len(listing["itemListElement"]))

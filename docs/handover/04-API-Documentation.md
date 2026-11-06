@@ -67,7 +67,7 @@
   "phone": "+966 57 648 6491", "whatsapp": "",
   "address": "شارع المكرونة، مجمع الشرق، حي مشرفة، جدة 23444",
   "map_url": "https://maps.app.goo.gl/kn2kxuPujQT9raLG7?g_st=awb",
-  "delivery_fee": 0, "delivery_note": "تفصيل الستائر حسب المقاس؛ …", "site_ready": false,
+  "delivery_fee": 0, "delivery_note": "تفصيل الستائر حسب المقاس؛ …",
   "seo_title": "…", "seo_description": "…", "hero_title": "ستائر تكمّل أناقة بيتك.", "hero_copy": "…",
   "about_title": "من نحن", "opening_hours": ""
 }
@@ -161,8 +161,8 @@
 
 ### `GET /robots.txt` و`GET /sitemap.xml`
 
-- قبل تفعيل `site_ready`: `robots.txt` = `User-agent: *` + `Disallow: /`، و`sitemap.xml` يعيد `404`.
-- بعد التفعيل: `robots.txt` يسمح بكل شيء عدا `/admin` و`/api/` ويشير إلى الخريطة؛ و`sitemap.xml` يضم الرئيسية وصفحات المتجر والقانونية والأقسام التي فيها منتجات وكل منتج مع صورته وتاريخ آخر تعديل.
+- الموقع مفتوح دائمًا لمحركات البحث: `robots.txt` = `User-agent: *` + `Allow: /` + `Disallow: /admin` + `Disallow: /api/` + `Sitemap: <base>/sitemap.xml`، ويعيد `sitemap.xml` الرمز `200` دائمًا. (أُزيل خيار `site_ready`؛ إن أُرسل في `PUT /api/admin/settings` فيتجاهله الخادم.)
+- `sitemap.xml` يضم الرئيسية وصفحات المتجر والقانونية والأقسام التي فيها منتجات وكل منتج مع صورته وتاريخ آخر تعديل.
 
 ---
 
@@ -373,7 +373,7 @@ MH-261009-00001,عميل تجريبي,0500000000,جدة,تم التأكيد,0,0,
 ```json
 {"settings": {"store_name": "الفخامة للأقمشة والستائر", "tagline": "…", "city": "جدة", "phone": "+966 57 648 6491",
   "whatsapp": "", "address": "…", "map_url": "https://maps.app.goo.gl/…", "delivery_fee": "0", "delivery_note": "…",
-  "instagram": "", "site_ready": "0", "seo_title": "…", "seo_description": "…", "hero_title": "…", "hero_copy": "…",
+  "instagram": "", "seo_title": "…", "seo_description": "…", "hero_title": "…", "hero_copy": "…",
   "about_title": "من نحن", "about_body": "…", "opening_hours": "", "ga4_id": "", "google_site_verification": "",
   "sample_cleanup_v1": "1", "seed_wavy_v1": "1"}}
 ```
@@ -389,7 +389,6 @@ MH-261009-00001,عميل تجريبي,0500000000,جدة,تم التأكيد,0,0,
 | `delivery_note` 400، `seo_title` 180، `seo_description` 320، `hero_title` 180، `hero_copy` 600 | نص |
 | `about_title` 120، `about_body` 3000، `opening_hours` 300 | نص صفحة «من نحن» |
 | `delivery_fee` | عدد صحيح 0–10,000,000 |
-| `site_ready` | قيمة منطقية ← `"1"` أو `"0"` |
 | `ga4_id` | فارغ أو `G-` ثم 4–15 حرفًا/رقمًا إنجليزيًا (تُحوَّل إلى حروف كبيرة)، وإلا `400` |
 | `google_site_verification` | فارغ أو 10–120 من `A-Z a-z 0-9 _ -`؛ يُقبل لصق وسم `<meta … content="…">` كاملًا أو `google-site-verification=…` فيُستخرج الرمز، وإلا `400` |
 

@@ -262,7 +262,6 @@ DEFAULT_SETTINGS = {
     "delivery_fee": "0",
     "delivery_note": "تفصيل الستائر حسب المقاس؛ تواصل مع المتجر لتأكيد التوصيل والتركيب بحسب موقعك.",
     "instagram": "",
-    "site_ready": "0",
     "seo_title": "الفخامة للأقمشة والستائر | تفصيل ستائر في جدة",
     "seo_description": "الفخامة للأقمشة والستائر في جدة: تفصيل ستائر، ستائر رول وشرائح معدنية وكهربائية، وأقمشة متنوعة. زورونا في شارع المكرونة، مجمع الشرق، حي مشرفة.",
     "hero_title": "ستائر تكمّل أناقة بيتك.",
@@ -298,11 +297,6 @@ except Exception as _exc:  # خطأ في إعداد النسخ الخارجي ل
     print(f"[persist] النسخ الخارجي معطّل بسبب خطأ في الإعداد / disabled, bad config: {type(_exc).__name__}", flush=True)
     PERSIST = persist.Persistence(None, DATA_DIR, DB_PATH, UPLOAD_DIR, UPLOAD_NAME_RE,
                                   required_tables=REQUIRED_TABLES, default_settings=DEFAULT_SETTINGS)
-# SITE_READY_DEFAULT=1: قاعدة جديدة تماما تبدأ بالموقع "جاهز" (بلا شريط النسخة التجريبية). هذه قيمة افتراضية لقاعدة جديدة فقط
-# ولا تغيّر أبدًا قيمة حفظها المدير.
-# القيمة الافتراضية: الموقع المنشور علنًا (PUBLIC_BASE_URL أو TRUST_PROXY خلف استضافة) يبدأ "جاهزًا" فيسمح لمحركات البحث
-# بفهرسته (robots.txt وsitemap.xml)؛ أما التشغيل المحلي فيبقى "غير جاهز". يمكن فرض أي من الحالتين بـ SITE_READY_DEFAULT=1 أو 0.
-SITE_READY_DEFAULT = os.environ.get("SITE_READY_DEFAULT", "1" if (PUBLIC_BASE_URL or TRUST_PROXY) else "0") == "1"
 
 
 # تحدد أين تُخزَّن البيانات فعليًا لتحذير المدير: s3 / disk / ephemeral.
@@ -422,11 +416,8 @@ def init_db() -> str | None:
     """Create the schema and seed data. Returns the generated admin password on first run, else None."""
     generated_password: str | None = None
     with connect_db() as conn:
-        # وضع WAL يسمح بالقراءة أثناء الكتابة. ونتحقق هل القاعدة جديدة تمامًا (لا جدول settings) لتطبيق
-        # SITE_READY_DEFAULT مرة واحدة.
+        # وضع WAL يسمح بالقراءة أثناء الكتابة.
         conn.execute("PRAGMA journal_mode = WAL")
-        # قاعدة جديدة تماما = لا جدول settings بعد؛ فقط حينها نطبّق SITE_READY_DEFAULT.
-        fresh_db = not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'").fetchone()
         # مخطط الجداول: categories (الأقسام) و products (المنتجات) و product_images (معرض الصور) و audit_log
         # (سجل النشاط)
         # و settings (إعدادات مفتاح/قيمة) و admins (حسابات المدير) و orders/order_items (الطلبات وبنودها) و
@@ -544,13 +535,10 @@ def init_db() -> str | None:
                                    ("admins", "totp_secret", "TEXT NOT NULL DEFAULT ''")):
             if column not in {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-        # زرع الأقسام والإعدادات الافتراضية دون استبدال ما يوجد. site_ready=1 فقط لقاعدة جديدة تمامًا وعند ضبط
-        # SITE_READY_DEFAULT.
+        # زرع الأقسام والإعدادات الافتراضية دون استبدال ما يوجد.
         for slug, name, order in CATEGORIES:
             conn.execute("INSERT OR IGNORE INTO categories(slug,name,sort_order,active) VALUES(?,?,?,1)", (slug, name, order))
         for key, value in DEFAULT_SETTINGS.items():
-            if key == "site_ready" and fresh_db and SITE_READY_DEFAULT:
-                value = "1"
             conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
         # تنظيف لمرة واحدة (علامة sample_cleanup_v1): حذف المنتجات التجريبية القديمة إن بقيت دون تعديل، أو
         # إخفاؤها إن ارتبطت بطلب.
@@ -844,7 +832,7 @@ GOOGLE_VERIFICATION_ENV = os.environ.get("GOOGLE_SITE_VERIFICATION", "").strip()
 
 def get_settings(conn: sqlite3.Connection) -> dict:
     data = DEFAULT_SETTINGS.copy()
-    data.update({row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings WHERE key<>?", (ADMIN_FP_KEY,))})
+    data.update({row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings WHERE key NOT IN (?, 'site_ready')", (ADMIN_FP_KEY,))})
     if GOOGLE_VERIFICATION_ENV and not str(data.get("google_site_verification") or "").strip():
         try:
             data["google_site_verification"] = clean_google_settings({"google_site_verification": GOOGLE_VERIFICATION_ENV})["google_site_verification"]
@@ -1559,14 +1547,13 @@ class StoreHandler(BaseHTTPRequestHandler):
         base = self.base_url()
         with connect_db() as conn:
             settings = get_settings(conn)
-        ready = settings.get("site_ready", "0") == "1"
         store = settings.get("store_name") or seo.SITE_NAME_FALLBACK
         page = seo.render_page(
             template, title=settings.get("seo_title") or store, description=settings.get("seo_description", ""),
-            robots="index,follow,max-image-preview:large" if ready else "noindex,nofollow",
-            canonical=(base + "/") if ready else "", og_url=base + "/" if ready else "",
+            robots="index,follow,max-image-preview:large",
+            canonical=base + "/", og_url=base + "/",
             og_image=seo.absolute(base, DEFAULT_SHARE_IMAGE), og_type="website",
-            schemas=[seo.store_schema(settings, base, ready, DEFAULT_SHARE_IMAGE), seo.website_schema(settings, base)],
+            schemas=[seo.store_schema(settings, base, DEFAULT_SHARE_IMAGE), seo.website_schema(settings, base)],
             site_name=store, preload_image=DEFAULT_SHARE_IMAGE, image_alt=store, verification=seo.site_verification(settings))
         ga4 = self.storefront_ga4(settings)
         markup = pages.fill_store(pages.fill_consent(pages.fill_home_faq(page), ga4), settings)
@@ -1578,9 +1565,9 @@ class StoreHandler(BaseHTTPRequestHandler):
                     preload: str = "", noindex: bool = False, search: str = "", headers: dict | None = None) -> None:
         """A sub-page inside the shared storefront shell (index.html): same header, footer, cart, dialogs and scripts,
         its own <main>, <body data-page>, <head> (title, description, robots, canonical, Open Graph, JSON-LD) and styles.
-        Indexable (and canonical) only once the owner marked the store ready, and only for a 200 page."""
+        Indexable (and canonical) for every 200 page except those the caller marks noindex (search results, errors)."""
         base = self.base_url()
-        indexable = settings.get("site_ready", "0") == "1" and status == 200 and not noindex
+        indexable = status == 200 and not noindex
         title, description = meta
         document = seo.render_page(
             (BASE_DIR / "index.html").read_text(encoding="utf-8"), title=title, description=description,
@@ -1678,10 +1665,9 @@ class StoreHandler(BaseHTTPRequestHandler):
         base = self.base_url()
         meta = seo.page_meta("about", settings)
         title = (settings.get("about_title") or "").strip() or "من نحن"
-        ready = settings.get("site_ready", "0") == "1"
         photo = (products[0]["image"], products[0].get("alt") or products[0]["name"]) if products else None
         schemas = [seo.breadcrumb_schema(base, [(seo.HOME_LABEL, "/"), (title, "/about")]),
-                   seo.about_schema(base, settings, ready, DEFAULT_SHARE_IMAGE, meta[0], meta[1])]
+                   seo.about_schema(base, settings, DEFAULT_SHARE_IMAGE, meta[0], meta[1])]
         self.render_page(settings, page="about", main=pages.render_about(settings, categories, photo), path="/about",
                          meta=meta, schemas=schemas, image=photo[0] if photo else "")
 
@@ -1692,7 +1678,7 @@ class StoreHandler(BaseHTTPRequestHandler):
         base = self.base_url()
         meta = seo.page_meta("contact", settings)
         schemas = [seo.breadcrumb_schema(base, [(seo.HOME_LABEL, "/"), ("تواصل معنا", "/contact")]),
-                   seo.contact_schema(base, settings, settings.get("site_ready", "0") == "1", DEFAULT_SHARE_IMAGE, meta[0], meta[1])]
+                   seo.contact_schema(base, settings, DEFAULT_SHARE_IMAGE, meta[0], meta[1])]
         self.render_page(settings, page="contact", main=pages.render_contact(settings, notice, values), path="/contact",
                          meta=meta, schemas=schemas, status=status, noindex=notice is not None, headers=headers)
 
@@ -2064,9 +2050,6 @@ class StoreHandler(BaseHTTPRequestHandler):
                         conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, val))
                 for key, val in google.items():
                     conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, val))
-                if "site_ready" in data:
-                    ready = "1" if data["site_ready"] else "0"
-                    conn.execute("INSERT INTO settings(key,value) VALUES('site_ready',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (ready,))
                 if "delivery_fee" in data:
                     fee = int_field(data["delivery_fee"], "رسوم التوصيل", 0, 10_000_000)
                     conn.execute("INSERT INTO settings(key,value) VALUES('delivery_fee',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(fee),))
@@ -2226,7 +2209,7 @@ class StoreHandler(BaseHTTPRequestHandler):
                     self.send_json({"ok": True, "service": "fakhama-store", "version": VERSION, "db": True, "time": now_iso()}); return
                 if path == "/api/store":
                     with connect_db() as conn: settings = get_settings(conn)
-                    self.send_json({"name": settings["store_name"], "tagline": settings["tagline"], "city": settings["city"], "phone": settings["phone"], "whatsapp": settings["whatsapp"], "address": settings["address"], "map_url": settings.get("map_url", ""), "delivery_fee": int(settings.get("delivery_fee", "0") or 0), "delivery_note": settings.get("delivery_note", ""), "site_ready": settings.get("site_ready", "0") == "1", "seo_title": settings.get("seo_title", ""), "seo_description": settings.get("seo_description", ""), "hero_title": settings.get("hero_title", ""), "hero_copy": settings.get("hero_copy", ""), "about_title": (settings.get("about_title") or "").strip() or "من نحن", "opening_hours": settings.get("opening_hours", "")}, revalidate=True); return
+                    self.send_json({"name": settings["store_name"], "tagline": settings["tagline"], "city": settings["city"], "phone": settings["phone"], "whatsapp": settings["whatsapp"], "address": settings["address"], "map_url": settings.get("map_url", ""), "delivery_fee": int(settings.get("delivery_fee", "0") or 0), "delivery_note": settings.get("delivery_note", ""), "seo_title": settings.get("seo_title", ""), "seo_description": settings.get("seo_description", ""), "hero_title": settings.get("hero_title", ""), "hero_copy": settings.get("hero_copy", ""), "about_title": (settings.get("about_title") or "").strip() or "من نحن", "opening_hours": settings.get("opening_hours", "")}, revalidate=True); return
                 if path == "/api/categories":
                     with connect_db() as conn: rows = conn.execute("SELECT slug,name,sort_order,image,description FROM categories WHERE active=1 ORDER BY sort_order,name").fetchall()
                     self.send_json({"categories": [{**dict(r), "image": public_image(r["image"])} for r in rows]}, revalidate=True); return
@@ -2348,17 +2331,14 @@ class StoreHandler(BaseHTTPRequestHandler):
                     if not self.require_admin(): return
                     self.export_orders(); return
                 if path in ("/robots.txt", "/sitemap.xml"):
-                    # Crawlers are kept out until the owner marks the store data as real and ready (Settings → site_ready).
+                    # الموقع متاح دائمًا لمحركات البحث: robots.txt يسمح بالزحف وsitemap.xml يضم الصفحات والمنتجات والأقسام الظاهرة.
                     with connect_db() as conn:
-                        ready = get_settings(conn).get("site_ready", "0") == "1"
-                        rows = conn.execute("SELECT p.slug,p.image,p.updated_at FROM products p JOIN categories c ON c.slug=p.category WHERE p.active=1 AND c.active=1 ORDER BY p.id DESC").fetchall() if ready else []
+                        rows = conn.execute("SELECT p.slug,p.image,p.updated_at FROM products p JOIN categories c ON c.slug=p.category WHERE p.active=1 AND c.active=1 ORDER BY p.id DESC").fetchall()
                         category_slugs = [r["slug"] for r in conn.execute(
                             "SELECT c.slug FROM categories c WHERE c.active=1 AND EXISTS (SELECT 1 FROM products p WHERE p.category=c.slug AND p.active=1) "
-                            "ORDER BY c.sort_order,c.name")] if ready else []
+                            "ORDER BY c.sort_order,c.name")]
                     if path == "/robots.txt":
-                        self._send(200, seo.robots_txt(self.base_url(), ready).encode(), "text/plain; charset=utf-8", {"Cache-Control": "public, max-age=3600"}); return
-                    if not ready:
-                        self._send(404, b"Not found", "text/plain; charset=utf-8"); return
+                        self._send(200, seo.robots_txt(self.base_url()).encode(), "text/plain; charset=utf-8", {"Cache-Control": "public, max-age=3600"}); return
                     products = [{"slug": r["slug"], "image": public_image(r["image"]), "updated_at": r["updated_at"]} for r in rows]
                     self._send(200, seo.sitemap_xml(self.base_url(), products, list(legal.PAGES), seo.MAIN_PAGES, category_slugs).encode(), "application/xml; charset=utf-8", {"Cache-Control": "public, max-age=3600"}); return
                 if path.startswith("/api/"):

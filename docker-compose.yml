@@ -16,7 +16,6 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       # عنوان الموقع العام؛ العلامة :? توقف التشغيل برسالة خطأ إن لم يُضبط DOMAIN.
       PUBLIC_BASE_URL: https://${DOMAIN:?set DOMAIN to your domain name}
-      SITE_READY_DEFAULT: ${SITE_READY_DEFAULT:-1}
       # اختياري: نسخ لقطات إلى مخزن S3 خاص (R2 / B2 / S3 / MinIO). فارغة = معطّل. ضعها في ملف .env لا في Git.
       BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}

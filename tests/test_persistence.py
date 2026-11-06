@@ -661,7 +661,7 @@ class ServerPersistenceTests(ServerCase):
     def setUpClass(cls):
         cls.store = FakeS3()
         cls.admin_password = "Test-only-password-not-real-1"
-        cls.env = {"ADMIN_PASSWORD": cls.admin_password, "SITE_READY_DEFAULT": "1", "BACKUP_INTERVAL": "1",
+        cls.env = {"ADMIN_PASSWORD": cls.admin_password, "BACKUP_INTERVAL": "1",
                    **cls.store.env()}
         cls.start_server(env=cls.env)
 
@@ -696,7 +696,6 @@ class ServerPersistenceTests(ServerCase):
             "orders": sorted(o["order_number"] for o in self.json("GET", "/api/admin/orders", **kw)[1]["orders"]),
             "messages": sorted(m["message"] for m in self.json("GET", "/api/admin/messages", **kw)[1]["messages"]),
             "tagline": self.json("GET", "/api/admin/settings", **kw)[1]["settings"]["tagline"],
-            "site_ready": self.json("GET", "/api/store")[1]["site_ready"],
             "visits": dash["kpis"]["visits_period"],
             "top_pages": dash["top_pages"],
             "referrers": dash["referrers"],
@@ -710,7 +709,6 @@ class ServerPersistenceTests(ServerCase):
         health = self.json("GET", "/api/health")[1]
         self.assertNotIn("persistence", health, "الصحة العامة لا تكشف وضع النسخ")
         self.assertNotIn("last_snapshot", health)
-        self.assertTrue(self.json("GET", "/api/store")[1]["site_ready"], "SITE_READY_DEFAULT=1 لقاعدة جديدة")
         # بيانات مهمة
         up = self.json("POST", "/api/admin/upload", {"data": data_uri("image/png", PNG), "thumb": data_uri("image/jpeg", JPEG)}, **kw)[1]
         status, product, _ = self.json("POST", "/api/admin/products", {"name": "ستارة اختبار الحفظ", "category": "curtains", "price": 123,
@@ -721,7 +719,7 @@ class ServerPersistenceTests(ServerCase):
         self.assertEqual(status, 201, order)
         self.assertEqual(self.json("POST", "/api/contact", {"name": "عميل التواصل", "phone": "0551234567", "message": "رسالة اختبار الحفظ الدائم",
                                                           "consent": True})[0], 201)
-        self.assertEqual(self.json("PUT", "/api/admin/settings", {"tagline": "شعار محفوظ", "site_ready": False}, **kw)[0], 200)
+        self.assertEqual(self.json("PUT", "/api/admin/settings", {"tagline": "شعار محفوظ"}, **kw)[0], 200)
         # يجب أن تظهر لقطة مهمة بسرعة
         self.assertTrue(self.wait_for(lambda: "alfakhama/latest.json" in self.store.keys()), "لم تظهر لقطة")
         self.assertTrue(self.wait_for(lambda: any(k.startswith("alfakhama/uploads/") for k in self.store.keys())), "لم تُرفع الصورة")
@@ -734,7 +732,6 @@ class ServerPersistenceTests(ServerCase):
         self.assertEqual(self.store.count("PUT", "alfakhama/db/"), puts_before, "زيارات الزوار لا تسبب رفعًا")
         state = self.snapshot_of_state(cookie, csrf)
         self.assertGreaterEqual(state["visits"], 8)
-        self.assertFalse(state["site_ready"], "قيمة حفظها المدير لا تُلغى")
         # SIGTERM: اللقطة الأخيرة تحفظ الزيارات
         self.proc.send_signal(signal.SIGTERM)
         out, err = self.proc.communicate(timeout=30)
@@ -755,7 +752,6 @@ class ServerPersistenceTests(ServerCase):
         self.assertEqual(again["orders"], state["orders"])
         self.assertEqual(again["messages"], state["messages"])
         self.assertEqual(again["tagline"], "شعار محفوظ")
-        self.assertFalse(again["site_ready"], "SITE_READY_DEFAULT لا يطغى على قيمة محفوظة")
         self.assertEqual(again["visits"], state["visits"], "إحصاءات الزيارات عادت كاملة")
         self.assertEqual(again["top_pages"], state["top_pages"])
         self.assertEqual(again["referrers"], state["referrers"])
@@ -768,32 +764,13 @@ class ServerPersistenceTests(ServerCase):
 
 
 # ---- الإعدادات الافتراضية والصحة ----
-# SITE_READY_DEFAULT=1 يؤثر على قواعد البيانات الجديدة فقط ولا يطغى على قيمة حفظها المدير.
-class SiteReadyDefaultTests(ServerCase):
-    ENV = {"SITE_READY_DEFAULT": "1"}
-
-    def test_only_new_databases_get_the_default(self):
-        self.assertTrue(self.json("GET", "/api/store")[1]["site_ready"])
-        cookie, csrf = self.login()
-        self.assertEqual(self.json("PUT", "/api/admin/settings", {"site_ready": False}, cookie=cookie, csrf=csrf)[0], 200)
-        self.proc.terminate()
-        self.proc.communicate(timeout=10)
-        self.start_server(data_dir=self.data_dir, env={"ADMIN_PASSWORD": self.admin_password, **self.ENV})
-        self.assertFalse(self.json("GET", "/api/store")[1]["site_ready"], "قيمة المدير المحفوظة لا تُستبدل")
-
-
-class NoDefaultTests(ServerCase):
-    def test_default_remains_demo_without_the_variable(self):
-        self.assertFalse(self.json("GET", "/api/store")[1]["site_ready"])
-
-
-# الموقع المنشور علنًا (خلف بروكسي مع عنوان عام) يبدأ جاهزًا للفهرسة: robots.txt يسمح وsitemap.xml موجودة،
-# وصفحة المنتجات تحمل index,follow. والقيمة 0 الصريحة تُبقيه غير جاهز.
+# الموقع متاح دائمًا لمحركات البحث (لا توجد حالة "نسخة تجريبية"): robots.txt يسمح وsitemap.xml موجودة،
+# وصفحة المنتجات تحمل index,follow، وذلك حتى بعد مسح القاعدة وإعادة الإنشاء.
 class PublicDeploymentIndexableTests(ServerCase):
     ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com"}
 
     def test_public_site_is_open_to_search_engines_by_default(self):
-        self.assertTrue(self.json("GET", "/api/store")[1]["site_ready"])
+        self.assertNotIn("site_ready", self.json("GET", "/api/store")[1], "لم يبق خيار نسخة تجريبية")
         robots = self.req("GET", "/robots.txt")[2].decode()
         self.assertIn("Allow: /", robots)
         self.assertNotIn("Disallow: /\n", robots.replace("Disallow: /admin", "").replace("Disallow: /api/", ""))
@@ -804,15 +781,6 @@ class PublicDeploymentIndexableTests(ServerCase):
         page = self.req("GET", "/products")[2].decode()
         self.assertIn('content="index,follow', page)
         self.assertNotIn("noindex", page.split("</head>")[0])
-
-
-class PublicDeploymentForcedDemoTests(ServerCase):
-    ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com", "SITE_READY_DEFAULT": "0"}
-
-    def test_explicit_zero_keeps_search_engines_out(self):
-        self.assertFalse(self.json("GET", "/api/store")[1]["site_ready"])
-        self.assertIn("Disallow: /\n", self.req("GET", "/robots.txt")[2].decode())
-        self.assertEqual(self.req("GET", "/sitemap.xml")[0], 404)
 
 
 # رمز Search Console من متغير البيئة يظهر كوسم meta في الصفحة العامة دون أن يُحفظ في القاعدة.
