@@ -47,6 +47,9 @@ services:
         sync: false
       - key: BACKUP_S3_PREFIX
         sync: false
+      # رمز التحقق من Google Search Console (وسم HTML): يبقى بعد أي إعادة تشغيل. القيمة تُدخل في لوحة Render.
+      - key: GOOGLE_SITE_VERIFICATION
+        sync: false
     # ---- القرص الدائم (اختياري) ----
     # الحل (أ): الأقراص تتطلب خطة مدفوعة (Starter فما فوق). أزل علامة # عن الأسطر التالية بعد ترقية الخطة
     # وغيّر plan: free (في الأعلى) إلى starter. على الخطة المجانية يفشل النشر إن وُجد قسم disk.

@@ -787,15 +787,51 @@ class NoDefaultTests(ServerCase):
         self.assertFalse(self.json("GET", "/api/store")[1]["site_ready"])
 
 
-# وضع التخزين يكون disk إن كان مجلد البيانات قرصاً مركّباً منفصلاً وإلا ephemeral (يُمسح عند إعادة التشغيل) مع
-# تحذير بالعربية.
+# الموقع المنشور علنًا (خلف بروكسي مع عنوان عام) يبدأ جاهزًا للفهرسة: robots.txt يسمح وsitemap.xml موجودة،
+# وصفحة المنتجات تحمل index,follow. والقيمة 0 الصريحة تُبقيه غير جاهز.
+class PublicDeploymentIndexableTests(ServerCase):
+    ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com"}
+
+    def test_public_site_is_open_to_search_engines_by_default(self):
+        self.assertTrue(self.json("GET", "/api/store")[1]["site_ready"])
+        robots = self.req("GET", "/robots.txt")[2].decode()
+        self.assertIn("Allow: /", robots)
+        self.assertNotIn("Disallow: /\n", robots.replace("Disallow: /admin", "").replace("Disallow: /api/", ""))
+        self.assertIn("Sitemap: https://shop.example.com/sitemap.xml", robots)
+        status, _, body = self.req("GET", "/sitemap.xml")
+        self.assertEqual(status, 200)
+        self.assertIn("https://shop.example.com/products", body.decode())
+        page = self.req("GET", "/products")[2].decode()
+        self.assertIn('content="index,follow', page)
+        self.assertNotIn("noindex", page.split("</head>")[0])
+
+
+class PublicDeploymentForcedDemoTests(ServerCase):
+    ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com", "SITE_READY_DEFAULT": "0"}
+
+    def test_explicit_zero_keeps_search_engines_out(self):
+        self.assertFalse(self.json("GET", "/api/store")[1]["site_ready"])
+        self.assertIn("Disallow: /\n", self.req("GET", "/robots.txt")[2].decode())
+        self.assertEqual(self.req("GET", "/sitemap.xml")[0], 404)
+
+
+# رمز Search Console من متغير البيئة يظهر كوسم meta في الصفحة العامة دون أن يُحفظ في القاعدة.
+class VerificationFromEnvironmentTests(ServerCase):
+    ENV = {"GOOGLE_SITE_VERIFICATION": "AbC123_-token_for_tests-0987654321"}
+
+    def test_meta_tag_comes_from_the_environment(self):
+        page = self.req("GET", "/")[2].decode()
+        self.assertIn('<meta name="google-site-verification" content="AbC123_-token_for_tests-0987654321">', page)
+
+
+# وضع التخزين: ephemeral عند أول إقلاع (لم يثبت بعد أنه دائم) مع تحذير بالعربية؛ ويصير disk بعد أن تنجو علامة
+# التخزين من إعادة تشغيل حقيقية، أو فورًا إن أُعلن PERSISTENT_DISK=1. الجهاز المختلف عن / ليس دليلًا (وحدة Docker المؤقتة).
 class HealthAndWarningTests(ServerCase):
     ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com"}
 
     def test_mode_and_warning_follow_the_rules(self):
         health = self.json("GET", "/api/health")[1]
-        on_other_device = os.stat(self.data_dir).st_dev != os.stat("/").st_dev
-        expected = "disk" if on_other_device or os.path.ismount(self.data_dir) else "ephemeral"
+        expected = "ephemeral"  # أول إقلاع لمجلد جديد: لا علامة سابقة ولا إعلان
         self.assertNotIn("persistence", health)
         self.assertNotIn("last_snapshot", health)
         cookie, csrf = self.login()
@@ -807,6 +843,35 @@ class HealthAndWarningTests(ServerCase):
         self.assertEqual(bool(storage["warning"]), expected == "ephemeral")
         if storage["warning"]:
             self.assertRegex(storage["warning"], r"[؀-ۿ]")
+
+
+class DeclaredDiskTests(ServerCase):
+    ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com", "PERSISTENT_DISK": "1"}
+
+    def test_declared_disk_clears_the_warning_immediately(self):
+        cookie, csrf = self.login()
+        storage = self.json("GET", "/api/admin/dashboard?range=7", cookie=cookie, csrf=csrf,
+                            headers={"X-Forwarded-Proto": "https"})[1]["storage"]
+        self.assertEqual((storage["mode"], storage["warning"]), ("disk", ""))
+
+
+# خادم يُعاد تشغيله داخل الاختبار نفسه، لذلك له صنف مستقل حتى لا يؤثر على بقية اختبارات الصنف المشترك.
+class StorageCanaryRestartTests(ServerCase):
+    ENV = {"TRUST_PROXY": "1", "PUBLIC_BASE_URL": "https://shop.example.com"}
+
+    def test_marker_that_survives_a_restart_proves_persistence(self):
+        def mode_and_warning():
+            cookie, csrf = self.login()
+            storage = self.json("GET", "/api/admin/dashboard?range=7", cookie=cookie, csrf=csrf,
+                                headers={"X-Forwarded-Proto": "https"})[1]["storage"]
+            return storage["mode"], storage["warning"]
+        self.assertEqual(mode_and_warning()[0], "ephemeral")
+        type(self).proc.send_signal(signal.SIGTERM)
+        type(self).proc.communicate(timeout=30)
+        # نفس مجلد البيانات = تخزين نجا من إعادة التشغيل
+        type(self).start_server(data_dir=self.data_dir, env={"ADMIN_PASSWORD": self.admin_password, **self.ENV})
+        mode, warning = mode_and_warning()
+        self.assertEqual((mode, warning), ("disk", ""))
 
 
 class LocalNoWarningTests(ServerCase):

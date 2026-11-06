@@ -300,19 +300,38 @@ except Exception as _exc:  # خطأ في إعداد النسخ الخارجي ل
                                   required_tables=REQUIRED_TABLES, default_settings=DEFAULT_SETTINGS)
 # SITE_READY_DEFAULT=1: قاعدة جديدة تماما تبدأ بالموقع "جاهز" (بلا شريط النسخة التجريبية). هذه قيمة افتراضية لقاعدة جديدة فقط
 # ولا تغيّر أبدًا قيمة حفظها المدير.
-SITE_READY_DEFAULT = os.environ.get("SITE_READY_DEFAULT", "") == "1"
+# القيمة الافتراضية: الموقع المنشور علنًا (PUBLIC_BASE_URL أو TRUST_PROXY خلف استضافة) يبدأ "جاهزًا" فيسمح لمحركات البحث
+# بفهرسته (robots.txt وsitemap.xml)؛ أما التشغيل المحلي فيبقى "غير جاهز". يمكن فرض أي من الحالتين بـ SITE_READY_DEFAULT=1 أو 0.
+SITE_READY_DEFAULT = os.environ.get("SITE_READY_DEFAULT", "1" if (PUBLIC_BASE_URL or TRUST_PROXY) else "0") == "1"
 
 
 # تحدد أين تُخزَّن البيانات فعليًا لتحذير المدير: s3 / disk / ephemeral.
-def persistence_mode() -> str:
-    """s3 = لقطات خارجية، disk = DATA_DIR على قرص دائم (جهاز مختلف عن /)، ephemeral = يُمسح مع الحاوية."""
-    if PERSIST.enabled:
-        return "s3"
+# علامة تثبت أن التخزين يبقى بعد إعادة التشغيل: نكتب ملفًا صغيرًا في DATA_DIR في كل إقلاع، فإن وجدناه عند
+# الإقلاع التالي فهذا دليل فعلي على أن المجلد دائم. (لا نعتمد على "جهاز مختلف عن /" لأن Docker ينشئ وحدة تخزين
+# مؤقتة لسطر VOLUME فتبدو كقرص دائم وهي تُمسح عند كل إيقاف على Render المجاني.)
+STORAGE_CANARY = DATA_DIR / ".storage-canary"
+# PERSISTENT_DISK=1: يعلن المالك أنه ركّب قرصًا دائمًا (Render مدفوع + disk) فيزول التحذير فورًا دون انتظار إعادة تشغيل.
+PERSISTENT_DISK_DECLARED = os.environ.get("PERSISTENT_DISK", "") == "1"
+STORAGE_SURVIVED_RESTART = False
+
+
+def check_storage_canary() -> None:
+    """يُستدعى مرة عند الإقلاع: يسجّل هل وُجدت العلامة (نجا التخزين من إعادة تشغيل) ثم يجدّدها."""
+    global STORAGE_SURVIVED_RESTART
     try:
-        if os.path.ismount(DATA_DIR) or os.stat(DATA_DIR).st_dev != os.stat("/").st_dev:
-            return "disk"
+        STORAGE_SURVIVED_RESTART = STORAGE_CANARY.is_file()
+        STORAGE_CANARY.write_text(now_iso(), encoding="utf-8")
     except OSError:
         pass
+
+
+def persistence_mode() -> str:
+    """s3 = لقطات خارجية، disk = تخزين ثبت أنه دائم (علامة نجت من إعادة تشغيل أو PERSISTENT_DISK=1)،
+    ephemeral = يُمسح مع الحاوية أو لم يثبت بعد أنه دائم."""
+    if PERSIST.enabled:
+        return "s3"
+    if PERSISTENT_DISK_DECLARED or STORAGE_SURVIVED_RESTART:
+        return "disk"
     return "ephemeral"
 
 
@@ -321,7 +340,7 @@ def storage_info() -> dict:
     mode = persistence_mode()
     warning = ""
     if mode == "ephemeral" and (TRUST_PROXY or PUBLIC_BASE_URL):
-        warning = "التخزين مؤقت: بياناتك وصورك وإحصاءات الزيارات تضيع عند كل إعادة تشغيل للخدمة. فعّل التخزين الدائم (راجع دليل النشر)."
+        warning = "التخزين مؤقت أو لم يثبت بعد أنه دائم: بياناتك وصورك وإحصاءات الزيارات قد تضيع عند إعادة تشغيل الخدمة. فعّل التخزين الدائم (راجع دليل النشر)."
     if PERSIST.enabled and PERSIST.blocked:
         # المخزن لم يكن متاحًا عند الإقلاع: لا يُحفظ شيء الآن، والمدير يجب أن يعرف.
         warning = "النسخ الخارجي متوقف: تعذر الوصول إلى المخزن عند التشغيل فلا تُحفظ تغييراتك الآن. تحقق من إعدادات BACKUP_S3_* ثم أعد تشغيل الخدمة."
@@ -818,9 +837,19 @@ def dashboard_report(days: int, now: datetime | None = None) -> dict:
 
 # ---- دوال مساعدة للبيانات والتحقق ----
 # كل الإعدادات: الافتراضيات ثم القيم المخزّنة فوقها. نستثني مفتاح بصمة المدير الداخلي حتى لا يظهر في أي استجابة.
+# رمز التحقق من Google Search Console يمكن وضعه في متغير البيئة GOOGLE_SITE_VERIFICATION فيبقى بعد أي إعادة تشغيل
+# حتى لو مُسحت القاعدة (استضافة بلا تخزين دائم). الرمز المحفوظ من لوحة الإدارة له الأولوية إن وُجد.
+GOOGLE_VERIFICATION_ENV = os.environ.get("GOOGLE_SITE_VERIFICATION", "").strip()
+
+
 def get_settings(conn: sqlite3.Connection) -> dict:
     data = DEFAULT_SETTINGS.copy()
     data.update({row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings WHERE key<>?", (ADMIN_FP_KEY,))})
+    if GOOGLE_VERIFICATION_ENV and not str(data.get("google_site_verification") or "").strip():
+        try:
+            data["google_site_verification"] = clean_google_settings({"google_site_verification": GOOGLE_VERIFICATION_ENV})["google_site_verification"]
+        except APIError:
+            pass  # قيمة غير صالحة في البيئة: نتجاهلها بدل إيقاف الموقع
     return data
 
 
@@ -2733,6 +2762,7 @@ if __name__ == "__main__":
         sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "set-admin":
         sys.exit(run_set_admin())
+    check_storage_canary()  # هل نجا مجلد البيانات من إعادة تشغيل سابقة؟ (يحدد وضع التخزين المعروض للمدير)
     # الاستعادة قبل init_db وقبل الاستماع: إن كانت الحاوية فارغة تُعاد البيانات من المخزن الخارجي.
     # لا تُسجَّل هنا أي أسرار؛ الخادم يكمل بقاعدة جديدة إن فشلت الاستعادة.
     PERSIST.restore_on_startup()
